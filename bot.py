@@ -210,6 +210,21 @@ async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
     correct = await generate_correct_answer(question, grade)
     await callback.message.answer(f"✅ Эталонный ответ:\n\n{correct}", reply_markup=get_main_menu())
     await callback.answer()
+    
+@router.callback_query(F.data == "retry")
+async def retry_question(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    question = data.get("last_question")
+    grade = data.get("last_grade")
+
+    if not question or not grade:
+        await callback.message.answer("❌ Нет сохранённого вопроса.", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    await state.set_state(TaskState.waiting_for_answer)
+    await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос:\n\n{question}")
+    await callback.answer()
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
