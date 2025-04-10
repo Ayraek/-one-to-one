@@ -11,7 +11,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.context import FSMContext
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from aiogram import Router
+from aiogram import Router, F
 
 # Загрузка переменных окружения
 load_dotenv()
@@ -36,6 +36,15 @@ welcome_text = (
     "💡 Добро пожаловать в \"One to One Booster bot\" — вашего личного ассистента для прокачки навыков в продакт-менеджменте!\n\n"
     "Нажмите /start, чтобы начать 🔥"
 )
+
+# --- Главное меню ---
+def get_main_menu():
+    keyboard = [
+        [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")],
+        [InlineKeyboardButton(text="📚 Получить задание", callback_data="task")],
+        [InlineKeyboardButton(text="❓ Помощь", callback_data="help")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # --- Работа с базой данных ---
 def add_user_to_db(user_id, username, name, age):
@@ -67,7 +76,7 @@ async def cmd_start(message: types.Message, state: FSMContext):
     else:
         _, username, name, age, level, points = user
         await message.answer(f"👋 Привет, {name}!")
-        await message.answer(welcome_text)
+        await message.answer(welcome_text, reply_markup=get_main_menu())
 
 @router.message(RegisterState.name)
 async def process_name(message: types.Message, state: FSMContext):
@@ -83,12 +92,35 @@ async def process_age(message: types.Message, state: FSMContext):
     data = await state.get_data()
     name = data.get("name")
     add_user_to_db(message.from_user.id, message.from_user.username, name, int(message.text))
-    await message.answer(f"✅ Готово, {name}! Добро пожаловать!\nНажми /start, чтобы начать")
+    await message.answer(f"✅ Готово, {name}! Добро пожаловать!", reply_markup=get_main_menu())
     await state.clear()
 
 @router.message(lambda message: message.text == "/ping")
 async def cmd_ping(message: types.Message):
     await message.answer("🏓 Pong!")
+
+# --- Callback-хендлеры меню ---
+@router.callback_query(F.data == "profile")
+async def profile_callback(callback: types.CallbackQuery):
+    user = get_user_from_db(callback.from_user.id)
+    if user:
+        _, username, name, age, level, points = user
+        text = f"👤 Профиль:\nИмя: {name}\nВозраст: {age}\nУровень: {level}\nБаллы: {points}"
+        await callback.message.edit_text(text, reply_markup=get_main_menu())
+    else:
+        await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
+    await callback.answer()
+
+@router.callback_query(F.data == "help")
+async def help_callback(callback: types.CallbackQuery):
+    text = "ℹ️ Помощь:\n/start — начать\n📚 Получить задание — выбрать уровень и решить кейс."
+    await callback.message.edit_text(text, reply_markup=get_main_menu())
+    await callback.answer()
+
+@router.callback_query(F.data == "task")
+async def task_callback(callback: types.CallbackQuery):
+    await callback.message.edit_text("🔧 Выбор задания пока в разработке!", reply_markup=get_main_menu())
+    await callback.answer()
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
@@ -112,4 +144,3 @@ async def generate_question(grade: str) -> str:
 # --- Запуск бота ---
 if __name__ == "__main__":
     asyncio.run(dp.start_polling(bot, skip_updates=True))
- 
