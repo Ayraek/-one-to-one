@@ -73,6 +73,26 @@ def get_user_from_db(user_id):
         cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
         return cursor.fetchone()
 
+def update_user_points(user_id, additional_points):
+    with sqlite3.connect('users.db') as conn:
+        cursor = conn.cursor()
+        cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (additional_points, user_id))
+        conn.commit()
+
+def update_level(user_id):
+    user = get_user_from_db(user_id)
+    if not user:
+        return
+    _, username, name, age, current_level, points = user
+    index = LEVELS.index(current_level) if current_level in LEVELS else 0
+    if points >= 50 and index < len(LEVELS) - 1:
+        new_level = LEVELS[index + 1]
+        with sqlite3.connect('users.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('UPDATE users SET level = ? WHERE id = ?', (new_level, user[0]))
+            conn.commit()
+        logging.info(f"Пользователь {user[0]} повышен с {current_level} до {new_level}.")
+
 # --- Состояния ---
 class RegisterState(StatesGroup):
     name = State()
@@ -142,7 +162,7 @@ async def handle_grade_selection(callback: types.CallbackQuery, state: FSMContex
     grade = callback.data.replace("grade_", "")
     question = await generate_question(grade)
     await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=grade)
+    await state.update_data(question=question, grade=grade, last_score=0.0)
     await callback.message.edit_text(f"💬 Задание для уровня {grade}:\n\n{question}\n\n✍️ Напиши свой ответ сообщением.")
     await callback.answer()
 
@@ -151,7 +171,23 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     data = await state.get_data()
     grade = data.get("grade")
     question = data.get("question")
-    await message.answer(f"✅ Ответ принят. (Пока не оценивается)\n\nУровень: {grade}\nВопрос: {question}")
+    last_score = data.get("last_score", 0.0)
+
+    user = get_user_from_db(message.from_user.id)
+    student_name = user[2] if user else "студент"
+
+    feedback = await evaluate_answer(question, message.text, student_name)
+
+    match = re.search(r"Score:\s*([0-9.]+)", feedback)
+    new_score = float(match.group(1)) if match else 0.0
+
+    if new_score > last_score:
+        diff = new_score - last_score
+        update_user_points(message.from_user.id, diff)
+        update_level(message.from_user.id)
+        await state.update_data(last_score=new_score)
+
+    await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=get_main_menu())
     await state.clear()
 
 # --- OpenAI функции ---
@@ -173,7 +209,28 @@ async def generate_question(grade: str) -> str:
         logging.error(f"Ошибка генерации вопроса: {e}")
         return "❌ Ошибка генерации вопроса."
 
+async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
+    prompt = (
+        f"Вопрос: {question}\nОтвет студента: {student_answer}\n\n"
+        f"Ты обращаешься к студенту по имени {student_name}. Оцени ответ по шкале от 0 до 1."
+        " Формат:\nScore: <число>\nFeedback: <комментарий>."
+    )
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты преподаватель, оценивающий ответы студентов строго по критериям."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=200,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка оценки ответа: {e}")
+        return "❌ Ошибка оценки ответа."
+
 # --- Запуск бота ---
 if __name__ == "__main__":
     asyncio.run(dp.start_polling(bot, skip_updates=True))
-
