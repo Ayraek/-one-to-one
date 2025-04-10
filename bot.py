@@ -140,7 +140,6 @@ async def profile_callback(callback: types.CallbackQuery):
     user = get_user_from_db(callback.from_user.id)
     if user:
         _, username, name, age, level, points = user
-        # Получаем позицию в рейтинге
         with sqlite3.connect('users.db') as conn:
             cursor = conn.cursor()
             cursor.execute('SELECT id FROM users ORDER BY points DESC')
@@ -148,14 +147,13 @@ async def profile_callback(callback: types.CallbackQuery):
             rank = all_ids.index(callback.from_user.id) + 1 if callback.from_user.id in all_ids else '—'
 
         text = (
-            f"👤 Профиль:\n"
-            f"Имя: {name}\n"
-            f"Возраст: {age}\n"
-            f"Уровень: {level}\n"
-            f"Баллы: {points}\n"
-            f"🏆 Место в рейтинге: {rank}"
+            f"<b>👤 Имя:</b> {name}\n"
+            f"<b>🎂 Возраст:</b> {age}\n"
+            f"<b>🎯 Уровень:</b> {level}\n"
+            f"<b>⭐ Баллы:</b> {points}\n"
+            f"<b>🏆 Место в рейтинге:</b> {rank}"
         )
-        await callback.message.edit_text(text, reply_markup=get_main_menu())
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     else:
         await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
     await callback.answer()
