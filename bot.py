@@ -147,14 +147,10 @@ async def profile_callback(callback: types.CallbackQuery):
             rank = all_ids.index(callback.from_user.id) + 1 if callback.from_user.id in all_ids else '—'
 
         text = (
-            f"<b>👤 Имя:</b> {name}
-"
-            f"<b>🎂 Возраст:</b> {age}
-"
-            f"<b>🎯 Уровень:</b> {level}
-"
-            f"<b>⭐ Баллы:</b> {points}
-"
+            f"<b>👤 Имя:</b> {name}\n"
+            f"<b>🎂 Возраст:</b> {age}\n"
+            f"<b>🎯 Уровень:</b> {level}\n"
+            f"<b>⭐ Баллы:</b> {points}\n"
             f"<b>🏆 Место в рейтинге:</b> {rank}"
         )
         await callback.message.answer_photo(
@@ -162,9 +158,6 @@ async def profile_callback(callback: types.CallbackQuery):
             caption="Добро пожаловать в One to One IT Academy!"
         )
         await callback.message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
-    else:
-        await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
-    await callback.answer()
     else:
         await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
     await callback.answer()
