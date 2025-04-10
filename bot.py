@@ -140,7 +140,21 @@ async def profile_callback(callback: types.CallbackQuery):
     user = get_user_from_db(callback.from_user.id)
     if user:
         _, username, name, age, level, points = user
-        text = f"👤 Профиль:\nИмя: {name}\nВозраст: {age}\nУровень: {level}\nБаллы: {points}"
+        # Получаем позицию в рейтинге
+        with sqlite3.connect('users.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute('SELECT id FROM users ORDER BY points DESC')
+            all_ids = [row[0] for row in cursor.fetchall()]
+            rank = all_ids.index(callback.from_user.id) + 1 if callback.from_user.id in all_ids else '—'
+
+        text = (
+            f"👤 Профиль:\n"
+            f"Имя: {name}\n"
+            f"Возраст: {age}\n"
+            f"Уровень: {level}\n"
+            f"Баллы: {points}\n"
+            f"🏆 Место в рейтинге: {rank}"
+        )
         await callback.message.edit_text(text, reply_markup=get_main_menu())
     else:
         await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
@@ -210,7 +224,7 @@ async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
     correct = await generate_correct_answer(question, grade)
     await callback.message.answer(f"✅ Эталонный ответ:\n\n{correct}", reply_markup=get_main_menu())
     await callback.answer()
-    
+
 @router.callback_query(F.data == "retry")
 async def retry_question(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
