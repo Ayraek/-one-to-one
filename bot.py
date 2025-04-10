@@ -46,6 +46,18 @@ def get_main_menu():
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_grades_menu():
+    keyboard = [
+        [InlineKeyboardButton(text="👶 Junior", callback_data="grade_Junior")],
+        [InlineKeyboardButton(text="🧑 Middle", callback_data="grade_Middle")],
+        [InlineKeyboardButton(text="👨‍💼 Senior", callback_data="grade_Senior")],
+        [InlineKeyboardButton(text="💼 Head of Product", callback_data="grade_Head of Product")],
+        [InlineKeyboardButton(text="📊 CPO", callback_data="grade_CPO")],
+        [InlineKeyboardButton(text="🚀 CEO", callback_data="grade_CEO")],
+        [InlineKeyboardButton(text="🔙 Назад", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 # --- Работа с базой данных ---
 def add_user_to_db(user_id, username, name, age):
     with sqlite3.connect('users.db') as conn:
@@ -65,6 +77,9 @@ def get_user_from_db(user_id):
 class RegisterState(StatesGroup):
     name = State()
     age = State()
+
+class TaskState(StatesGroup):
+    waiting_for_answer = State()
 
 # --- Команды ---
 @router.message(lambda message: message.text == "/start")
@@ -119,8 +134,25 @@ async def help_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "task")
 async def task_callback(callback: types.CallbackQuery):
-    await callback.message.edit_text("🔧 Выбор задания пока в разработке!", reply_markup=get_main_menu())
+    await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
     await callback.answer()
+
+@router.callback_query(F.data.startswith("grade_"))
+async def handle_grade_selection(callback: types.CallbackQuery, state: FSMContext):
+    grade = callback.data.replace("grade_", "")
+    question = await generate_question(grade)
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(question=question, grade=grade)
+    await callback.message.edit_text(f"💬 Задание для уровня {grade}:\n\n{question}\n\n✍️ Напиши свой ответ сообщением.")
+    await callback.answer()
+
+@router.message(TaskState.waiting_for_answer)
+async def handle_task_answer(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    grade = data.get("grade")
+    question = data.get("question")
+    await message.answer(f"✅ Ответ принят. (Пока не оценивается)\n\nУровень: {grade}\nВопрос: {question}")
+    await state.clear()
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
@@ -144,3 +176,4 @@ async def generate_question(grade: str) -> str:
 # --- Запуск бота ---
 if __name__ == "__main__":
     asyncio.run(dp.start_polling(bot, skip_updates=True))
+
