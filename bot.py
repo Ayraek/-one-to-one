@@ -187,8 +187,29 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=get_main_menu())
-    await state.clear()
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry")],
+        [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+
+    await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
+    await state.update_data(last_question=question, last_grade=grade)
+
+@router.callback_query(F.data == "show_answer")
+async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    question = data.get("last_question")
+    grade = data.get("last_grade")
+
+    if not question or not grade:
+        await callback.message.answer("❌ Нет сохранённого вопроса.", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    correct = await generate_correct_answer(question, grade)
+    await callback.message.answer(f"✅ Эталонный ответ:\n\n{correct}", reply_markup=get_main_menu())
+    await callback.answer()
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
@@ -230,6 +251,28 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
     except Exception as e:
         logging.error(f"Ошибка оценки ответа: {e}")
         return "❌ Ошибка оценки ответа."
+
+async def generate_correct_answer(question: str, grade: str) -> str:
+    prompt = (
+        f"Ты опытный преподаватель. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
+        f"Вопрос: {question}\n\n"
+        "Ответ должен быть структурированным, понятным и полезным для обучения."
+    )
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты генерируешь обучающие ответы для студентов по продакт-менеджменту."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка генерации эталонного ответа: {e}")
+        return "❌ Ошибка генерации эталонного ответа."
 
 # --- Запуск бота ---
 if __name__ == "__main__":
