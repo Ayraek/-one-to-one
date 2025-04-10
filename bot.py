@@ -154,9 +154,9 @@ async def profile_callback(callback: types.CallbackQuery):
             f"<b>🏆 Место в рейтинге:</b> {rank}"
         )
         await callback.message.answer_photo(
-            photo="https://raw.githubusercontent.com/Ayraek/-one-to-one/main/assets/logo.jpg",
-            caption="Добро пожаловать в One to One IT Academy!"
-        )
+    photo="https://i.imgur.com/zIPzQKF.jpeg",
+    caption="Добро пожаловать в One to One IT Academy!"
+)
         await callback.message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
     else:
         await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
