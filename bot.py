@@ -215,7 +215,7 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     ])
 
     await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
-    await state.clear()
+    # Очищать не будем, чтобы retry и show_answer могли использовать state
 
 @router.callback_query(F.data == "show_answer")
 async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
@@ -254,7 +254,6 @@ async def generate_correct_answer(question: str, grade: str) -> str:
         logging.error(f"Ошибка генерации правильного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
 
-
 @router.callback_query(F.data == "retry")
 async def retry_question(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -270,7 +269,6 @@ async def retry_question(callback: types.CallbackQuery, state: FSMContext):
 
     await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
     await callback.answer()
-
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
