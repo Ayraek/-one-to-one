@@ -203,11 +203,14 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    # Сохраняем последний вопрос и грейд в state для показа ответа
+    # Сохраняем последний вопрос и грейд в state для показа ответа или повтора
     await state.update_data(last_question=question, last_grade=grade)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")],
+        [
+            InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry"),
+            InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")
+        ],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
@@ -257,15 +260,17 @@ async def retry_question(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
     question = data.get("last_question")
     grade = data.get("last_grade")
-
     if not question or not grade:
-        await callback.message.answer("❌ Нет сохранённого вопроса.", reply_markup=get_main_menu())
+        await callback.message.answer("⚠️ Ошибка: нет сохранённого задания.", reply_markup=get_main_menu())
         await callback.answer()
         return
 
     await state.set_state(TaskState.waiting_for_answer)
-    await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос:\n\n{question}")
+    await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
+
+    await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
     await callback.answer()
+
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
