@@ -39,6 +39,20 @@ async def create_db_pool():
         port=parsed.port or 5432
     )
 
+    # Автоматически создаём таблицу users при старте
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id BIGINT PRIMARY KEY,
+                username TEXT,
+                name TEXT,
+                age INTEGER,
+                level TEXT,
+                points REAL
+            )
+        ''')
+
+
 ########################
 # Настройка OpenAI клиента
 ########################
