@@ -7,35 +7,38 @@ from dotenv import load_dotenv
 
 from openai import OpenAI
 
-from aiogram import Bot, Dispatcher, Router, F, types
+from aiogram import Bot, Dispatcher, Router, types, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 
-####################################
+########################
 # Загрузка переменных окружения
-####################################
+########################
 
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# Добавьте в Railway в переменные окружения ADMIN_IDS, например: "12345678,87654321"
+ADMIN_IDS = os.getenv("ADMIN_IDS", "")
+admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
-####################################
+########################
 # Настройка OpenAI клиента
-####################################
+########################
 
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-####################
+########################
 # Настройка логирования
-####################
+########################
 
 logging.basicConfig(level=logging.INFO)
 
-####################################
+########################
 # Инициализация бота/диспетчера
-####################################
+########################
 
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
@@ -43,18 +46,17 @@ dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-#########################
+########################
 # Глобальные переменные
-#########################
+########################
 
 LEVELS = ["Junior", "Middle", "Senior", "Head of Product", "CPO", "CEO"]
 
 welcome_text = (
-    "💡 Добро пожаловать в \"One to One Booster bot\" — вашего личного ассистента для прокачки навыков "
-    "в продакт-менеджменте!"
+    "💡 Добро пожаловать в \"One to One Booster bot\" — вашего личного ассистента для прокачки навыков в продакт-менеджменте!"
 )
 
-# Темы для заданий (используются при выборе темы)
+# Темы для заданий
 TOPICS = [
     "Гипотезы",
     "Маркетинг",
@@ -62,12 +64,12 @@ TOPICS = [
     "Управление командой",
     "Soft skills",
     "Стратегия",
-    "Требования к продукту",
+    "Требования к продукту"
 ]
 
-####################################
-# Меню
-####################################
+########################
+# Функции формирования меню
+########################
 
 def get_main_menu():
     keyboard = [
@@ -91,7 +93,6 @@ def get_grades_menu():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_topics_menu():
-    # Меню выбора темы для задания
     buttons = []
     for topic in TOPICS:
         buttons.append([InlineKeyboardButton(text=topic, callback_data=f"topic_{topic}")])
@@ -99,18 +100,16 @@ def get_topics_menu():
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def get_exam_menu():
-    # Сообщение о разделе экзамен, который появится в ближайшее время
     keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_news_menu():
-    # Информация о текущих возможностях и планах (Новости)
     keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-####################################
-# Работа с базой данных
-####################################
+########################
+# Функции работы с базой данных
+########################
 
 def add_user_to_db(user_id: int, username: str, name: str, age: int):
     with sqlite3.connect('users.db') as conn:
@@ -148,7 +147,7 @@ def update_level(user_id: int):
     if not user:
         return
     _, username, name, age, current_level, points = user
-    cur_index = LEVELS.index(current_level) if current_level in LEVELS else 0
+    cur_index = LEVELS.index(current_level)
     required_points = 50 * (cur_index + 1)
     if points >= required_points and cur_index < len(LEVELS) - 1:
         new_level = LEVELS[cur_index + 1]
@@ -158,9 +157,9 @@ def update_level(user_id: int):
             conn.commit()
         logging.info(f"Пользователь {user[0]} повышен с {current_level} до {new_level}.")
 
-####################################
+########################
 # Состояния
-####################################
+########################
 
 class RegisterState(StatesGroup):
     name = State()
@@ -169,15 +168,16 @@ class RegisterState(StatesGroup):
 class TaskState(StatesGroup):
     waiting_for_answer = State()
 
-####################################
-# Команды / Обработчики сообщений
-####################################
+########################
+# Основные команды и обработчики
+########################
 
+# Обработчик команды /start
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
     if user is None:
-        # Для нового пользователя показываем логотип и начинаем регистрацию
+        # Новый пользователь: показываем логотип и начинаем регистрацию
         await message.answer_photo(
             photo="https://i.imgur.com/zIPzQKF.jpeg",
             caption="Добро пожаловать в One to One IT Academy!"
@@ -185,7 +185,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer("👋 Как тебя зовут?")
         await state.set_state(RegisterState.name)
     else:
-        # Для зарегистрированного пользователя сразу показываем приветствие и главное меню
+        # Зарегистрированному сразу показываем приветствие и главное меню
         _, username, name, age, level, points = user
         await message.answer(f"👋 Привет, {name}!\n{welcome_text}", reply_markup=get_main_menu())
 
@@ -210,48 +210,43 @@ async def process_age(message: Message, state: FSMContext):
 async def cmd_ping(message: Message):
     await message.answer("🏓 Pong!")
 
-####################################
-# Обработчики CallbackQuery
-####################################
+########################
+# Админка
+########################
 
-@router.callback_query(F.data == "profile")
-async def profile_callback(callback: CallbackQuery):
-    user = get_user_from_db(callback.from_user.id)
-    if not user:
-        await callback.message.edit_text("🚫 Пользователь не найден. Попробуйте заново /start.", reply_markup=get_main_menu())
-        await callback.answer()
+# Команда /admin для администраторов
+@router.message(lambda message: message.text == "/admin")
+async def admin_panel(message: Message, state: FSMContext):
+    if message.from_user.id not in admin_ids:
+        await message.answer("🚫 У вас нет прав администратора.")
         return
-    _, username, name, age, level, points = user
-    text = (
-        f"<b>👤 Имя:</b> {name}\n"
-        f"<b>🎂 Возраст:</b> {age}\n"
-        f"<b>🎯 Уровень:</b> {level}\n"
-        f"<b>⭐ Баллы:</b> {points}\n"
-    )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
+    await message.answer("👑 Добро пожаловать в админ-панель.", reply_markup=get_admin_menu())
+
+def get_admin_menu():
+    keyboard = [
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="💬 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+@router.callback_query(F.data == "admin_stats")
+async def admin_stats_handler(callback: CallbackQuery):
+    try:
+        with sqlite3.connect('users.db') as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM users")
+            count = cursor.fetchone()[0]
+    except Exception as e:
+        logging.error(f"Ошибка получения статистики: {e}")
+        count = "не удалось получить статистику"
+    text = f"📊 Статистика:\nОбщее количество пользователей: {count}"
+    await callback.message.edit_text(text, reply_markup=get_admin_menu())
     await callback.answer()
 
-@router.callback_query(F.data == "news")
-async def news_callback(callback: CallbackQuery):
-    text = (
-        "📰 Новости:\n\n"
-        "Бот сейчас умеет: генерировать задания по продакт-менеджменту, оценивать ответы и выдавать фидбэк.\n\n"
-        "В ближайшее время ожидается:\n"
-        "• Раздел экзамен по каждому грейду\n"
-        "• Выгрузка файла со слабыми местами\n"
-        "• Анализ знаний и исследование уровня зарплат по рынку\n"
-        "• Улучшенный рейтинг пользователей\n"
-    )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_news_menu())
-    await callback.answer()
-
-@router.callback_query(F.data == "exam")
-async def exam_callback(callback: CallbackQuery):
-    text = (
-        "📝 Раздел Экзамен появится в ближайшее время.\n\n"
-        "Следите за обновлениями и нажимайте кнопку ниже, чтобы вернуться в главное меню."
-    )
-    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_exam_menu())
+@router.callback_query(F.data == "admin_broadcast")
+async def admin_broadcast_handler(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("Функция рассылки скоро будет доступна.", reply_markup=get_admin_menu())
     await callback.answer()
 
 @router.callback_query(F.data == "main_menu")
@@ -269,6 +264,45 @@ async def main_menu_callback(callback: CallbackQuery):
     else:
         await callback.message.edit_text(welcome_text, reply_markup=get_main_menu())
     await callback.answer()
+
+########################
+# Обработка главного меню и разделы
+########################
+
+@router.callback_query(F.data == "news")
+async def news_callback(callback: CallbackQuery):
+    text = (
+        "📰 Новости:\n\n"
+        "Бот сейчас умеет генерировать задания по продакт-менеджменту, оценивать ответы и выдавать фидбэк.\n\n"
+        "В ближайшее время ожидается:\n"
+        "• Раздел экзамен по каждому грейду\n"
+        "• Выгрузка файла со слабыми местами\n"
+        "• Анализ знаний и исследование уровня зарплат по рынку\n"
+        "• Улучшенный рейтинг пользователей\n"
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_news_menu())
+    await callback.answer()
+
+def get_news_menu():
+    keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+@router.callback_query(F.data == "exam")
+async def exam_callback(callback: CallbackQuery):
+    text = (
+        "📝 Раздел Экзамен появится в ближайшее время.\n\n"
+        "Следите за обновлениями и нажмите кнопку ниже, чтобы вернуться в главное меню."
+    )
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_exam_menu())
+    await callback.answer()
+
+def get_exam_menu():
+    keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+########################
+# Получение задания (выбор грейда и темы)
+########################
 
 @router.callback_query(F.data == "task")
 async def task_callback(callback: CallbackQuery):
@@ -316,6 +350,10 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\n✍️ Напишите свой ответ сообщением."
     )
     await callback.answer()
+
+########################
+# Обработка ответа пользователя
+########################
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
@@ -399,17 +437,17 @@ async def retry_question(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(f"✍️ Повторите, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
     await callback.answer()
 
-####################################
-# OpenAI функции
-####################################
+########################
+# Функции для работы с OpenAI
+########################
 
 async def generate_question(grade: str, topic: str) -> str:
     """
-    Генерирует короткий вопрос (до 800 символов) для продакт-менеджера уровня {grade} по теме {topic}.
-    Если вопрос превышает 800 символов, он обрезается.
+    Генерирует вопрос для продакт-менеджера уровня {grade} по теме {topic}.
+    Длина вопроса не должна превышать 800 символов.
     """
     prompt = (
-        f"Ты опытный продакт-менеджер. Сформулируй короткий, точный вопрос для уровня {grade} по теме «{topic}». "
+        f"Ты опытный продакт-менеджер. Сформулируй краткий, точный вопрос для уровня {grade} по теме «{topic}». "
         "Не более 800 символов, только самое важное. Избегай звездочек; используй эмодзи."
     )
     try:
@@ -417,7 +455,7 @@ async def generate_question(grade: str, topic: str) -> str:
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты генерируешь краткие вопросы для продакт-менеджеров. Не используй символ * (звёздочка). Максимальная длина — 800 символов."},
+                {"role": "system", "content": "Ты генерируешь краткие вопросы для продакт-менеджеров. Не используй символ *. Максимальная длина – 800 символов."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=250,
@@ -435,7 +473,7 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
     prompt = (
         f"Вопрос: {question}\n"
         f"Ответ студента: {student_answer}\n\n"
-        "Анализируй ответ по 5 критериям:\n"
+        "Проанализируй ответ по 5 критериям:\n"
         "1. Соответствие вопросу\n"
         "2. Полнота\n"
         "3. Аргументация\n"
@@ -493,9 +531,9 @@ async def generate_correct_answer(question: str, grade: str) -> str:
         logging.error(f"Ошибка генерации эталонного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
 
-####################################
+########################
 # Запуск бота
-####################################
+########################
 
 if __name__ == "__main__":
     asyncio.run(dp.start_polling(bot, skip_updates=True))
