@@ -203,14 +203,16 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
+    # Сохраняем последний вопрос и грейд в state для показа ответа
+    await state.update_data(last_question=question, last_grade=grade)
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry")],
         [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
     await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
-    await state.update_data(last_question=question, last_grade=grade)
+    await state.clear()
 
 @router.callback_query(F.data == "show_answer")
 async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
@@ -219,13 +221,36 @@ async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
     grade = data.get("last_grade")
 
     if not question or not grade:
-        await callback.message.answer("❌ Нет сохранённого вопроса.", reply_markup=get_main_menu())
+        await callback.message.answer("⚠️ Ошибка: не найден вопрос для показа ответа.", reply_markup=get_main_menu())
         await callback.answer()
         return
 
     correct = await generate_correct_answer(question, grade)
-    await callback.message.answer(f"✅ Эталонный ответ:\n\n{correct}", reply_markup=get_main_menu())
+    await callback.message.answer(f"✅ Эталонный ответ уровня {grade}:\n\n{correct}", parse_mode="HTML", reply_markup=get_main_menu())
     await callback.answer()
+
+async def generate_correct_answer(question: str, grade: str) -> str:
+    prompt = (
+        f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
+        f"Вопрос: {question}\n\n"
+        "Объясни ключевые моменты, приведи примеры, почему это правильно. Ответ от первого лица, к студенту."
+    )
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты генерируешь подробные правильные ответы для студентов."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=300,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка генерации правильного ответа: {e}")
+        return "❌ Ошибка генерации эталонного ответа."
+
 
 @router.callback_query(F.data == "retry")
 async def retry_question(callback: types.CallbackQuery, state: FSMContext):
