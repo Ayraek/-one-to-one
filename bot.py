@@ -129,6 +129,25 @@ def get_show_answer_menu():
         [InlineKeyboardButton(text="🏠 Вернуться в главное меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
+@router.callback_query(F.data == "profile")
+async def show_profile(callback: CallbackQuery):
+    user = await get_user_from_db(callback.from_user.id)
+    if user:
+        username = user["username"]
+        name = user["name"]
+        age = user["age"]
+        level = user["level"]
+        points = user["points"]
+        text = (
+            f"<b>👤 Имя:</b> {name}\n"
+            f"<b>🎂 Возраст:</b> {age}\n"
+            f"<b>🎯 Уровень:</b> {level}\n"
+            f"<b>⭐ Баллы:</b> {points}\n"
+        )
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
+    else:
+        await callback.message.edit_text(welcome_text, reply_markup=get_main_menu())
+    await callback.answer()
 
 ########################
 # Функции работы с базой данных
