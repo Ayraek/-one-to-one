@@ -296,18 +296,19 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         "- Примеры: <эмодзи>\n\n"
         "Score: <число от 0 до 1>\n"
         "Feedback: <подробный фидбэк>\n\n"
-        "Внимание: строго соблюдай формат. Не добавляй никакого текста до или после."
+        "Важно: не добавляй ничего кроме этого шаблона."
     )
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты преподаватель, строго оценивающий ответы по формату и критериям. Соблюдай формат без лишнего текста."},
+                {"role": "system", "content": "Ты преподаватель, строго оценивающий ответы по формату. Без лишнего текста."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=400,
-            temperature=0.3
+            max_tokens=450,
+            temperature=0.3,
+            stop=["\n\n"]
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
