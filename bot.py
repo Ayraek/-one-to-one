@@ -254,6 +254,37 @@ async def generate_correct_answer(question: str, grade: str) -> str:
         logging.error(f"Ошибка генерации правильного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
 
+async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
+    prompt = (
+        f"Вопрос: {question}\n"
+        f"Ответ студента: {student_answer}\n\n"
+        f"Проанализируй ответ студента {student_name} по 5 критериям:\n"
+        "1. Соответствие вопросу\n"
+        "2. Полнота\n"
+        "3. Аргументация\n"
+        "4. Структура\n"
+        "5. Примеры\n\n"
+        "Для каждого критерия выдай один из вариантов: ✅ (отлично), ⚠️ (удовлетворительно), ❌ (плохо)\n"
+        "После этого поставь общую оценку от 0 до 1 и дай развёрнутую обратную связь.\n"
+        "Формат:\n"
+        "Критерии:\n<список с эмодзи>\n\nScore: <число>\nFeedback: <текст>"
+    )
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты преподаватель, оценивающий ответы студентов по критериям."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=350,
+            temperature=0.7
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка оценки ответа: {e}")
+        return "❌ Ошибка оценки ответа."
+
 @router.callback_query(F.data == "retry")
 async def retry_question(callback: types.CallbackQuery, state: FSMContext):
     data = await state.get_data()
