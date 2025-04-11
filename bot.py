@@ -194,6 +194,8 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
 
     feedback_raw = await evaluate_answer(question, message.text, student_name)
 
+    logging.info(f"RAW_FEEDBACK:\n{feedback_raw}")
+
     # Разделим критерии, оценку и комментарий
     criteria_block = ""
     score_text = ""
