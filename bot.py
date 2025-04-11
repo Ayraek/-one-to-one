@@ -62,8 +62,15 @@ def get_grades_menu():
 def add_user_to_db(user_id, username, name, age):
     with sqlite3.connect('users.db') as conn:
         cursor = conn.cursor()
-        cursor.execute('''CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, username TEXT, name TEXT, age INTEGER, level TEXT, points INTEGER)''')
-        cursor.execute('''INSERT OR IGNORE INTO users (id, username, name, age, level, points) VALUES (?, ?, ?, ?, ?, ?)''',
+        cursor.execute('''CREATE TABLE IF NOT EXISTS users (
+                            id INTEGER PRIMARY KEY, 
+                            username TEXT, 
+                            name TEXT, 
+                            age INTEGER, 
+                            level TEXT, 
+                            points INTEGER)''')
+        cursor.execute('''INSERT OR IGNORE INTO users (id, username, name, age, level, points) 
+                          VALUES (?, ?, ?, ?, ?, ?)''',
                        (user_id, username, name, age, "Junior", 0))
         conn.commit()
 
@@ -154,9 +161,9 @@ async def profile_callback(callback: types.CallbackQuery):
             f"<b>🏆 Место в рейтинге:</b> {rank}"
         )
         await callback.message.answer_photo(
-    photo="https://i.imgur.com/zIPzQKF.jpeg",
-    caption="Добро пожаловать в One to One IT Academy!"
-)
+            photo="https://i.imgur.com/zIPzQKF.jpeg",
+            caption="Добро пожаловать в One to One IT Academy!"
+        )
         await callback.message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
     else:
         await callback.message.edit_text("🚫 Пользователь не найден.", reply_markup=get_main_menu())
@@ -192,6 +199,7 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
     student_name = user[2] if user else "студент"
 
+    # Оценка ответа студента с использованием подробного шаблона
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
@@ -253,27 +261,40 @@ async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
     await callback.message.answer(f"✅ Эталонный ответ уровня {grade}:\n\n{correct}", parse_mode="HTML", reply_markup=get_main_menu())
     await callback.answer()
 
-async def generate_correct_answer(question: str, grade: str) -> str:
-    prompt = (
-        f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
-        f"Вопрос: {question}\n\n"
-        "Объясни ключевые моменты, приведи примеры, почему это правильно. Ответ от первого лица, к студенту."
-    )
+@router.callback_query(F.data == "retry")
+async def retry_question(callback: types.CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    question = data.get("last_question")
+    grade = data.get("last_grade")
+    if not question or not grade:
+        await callback.message.answer("⚠️ Ошибка: нет сохранённого задания.", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
+
+    await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
+    await callback.answer()
+
+# --- OpenAI функции ---
+async def generate_question(grade: str) -> str:
+    prompt = f"Сгенерируй реалистичный вопрос для продакт-менеджера уровня {grade}. Вопрос должен быть понятным, конкретным и проверять базовые знания."
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты генерируешь подробные правильные ответы для студентов."},
+                {"role": "system", "content": "Ты помогаешь генерировать вопросы для продакт-менеджеров."},
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=300,
+            max_tokens=100,
             temperature=0.7
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"Ошибка генерации правильного ответа: {e}")
-        return "❌ Ошибка генерации эталонного ответа."
+        logging.error(f"Ошибка генерации вопроса: {e}")
+        return "❌ Ошибка генерации вопроса."
 
 async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
     prompt = (
@@ -315,75 +336,18 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         logging.error(f"Ошибка оценки ответа: {e}")
         return "❌ Ошибка оценки ответа."
 
-@router.callback_query(F.data == "retry")
-async def retry_question(callback: types.CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    question = data.get("last_question")
-    grade = data.get("last_grade")
-    if not question or not grade:
-        await callback.message.answer("⚠️ Ошибка: нет сохранённого задания.", reply_markup=get_main_menu())
-        await callback.answer()
-        return
-
-    await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
-
-    await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
-    await callback.answer()
-
-# --- OpenAI функции ---
-async def generate_question(grade: str) -> str:
-    prompt = f"Сгенерируй реалистичный вопрос для продакт-менеджера уровня {grade}. Вопрос должен быть понятным, конкретным и проверять базовые знания."
-    try:
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Ты помогаешь генерировать вопросы для продакт-менеджеров."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=100,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"Ошибка генерации вопроса: {e}")
-        return "❌ Ошибка генерации вопроса."
-
-async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
-    prompt = (
-        f"Вопрос: {question}\nОтвет студента: {student_answer}\n\n"
-        f"Ты обращаешься к студенту по имени {student_name}. Оцени ответ по шкале от 0 до 1."
-        " Формат:\nScore: <число>\nFeedback: <комментарий>."
-    )
-    try:
-        response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "Ты преподаватель, оценивающий ответы студентов строго по критериям."},
-                {"role": "user", "content": prompt}
-            ],
-            max_tokens=200,
-            temperature=0.7
-        )
-        return response.choices[0].message.content.strip()
-    except Exception as e:
-        logging.error(f"Ошибка оценки ответа: {e}")
-        return "❌ Ошибка оценки ответа."
-
 async def generate_correct_answer(question: str, grade: str) -> str:
     prompt = (
-        f"Ты опытный преподаватель. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
+        f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
         f"Вопрос: {question}\n\n"
-        "Ответ должен быть структурированным, понятным и полезным для обучения."
+        "Объясни ключевые моменты, приведи примеры, почему это правильно. Ответ от первого лица, к студенту."
     )
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты генерируешь обучающие ответы для студентов по продакт-менеджменту."},
+                {"role": "system", "content": "Ты генерируешь подробные правильные ответы для студентов."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=300,
