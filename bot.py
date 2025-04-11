@@ -214,7 +214,16 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
-    await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
+    if len(feedback) > 4000:
+        chunks = [feedback[i:i+4000] for i in range(0, len(feedback), 4000)]
+        for i, chunk in enumerate(chunks):
+            if i == len(chunks) - 1:
+                await message.answer(chunk, reply_markup=keyboard)
+            else:
+                await message.answer(chunk)
+    else:
+        await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
+
     # Очищать не будем, чтобы retry и show_answer могли использовать state
 
 @router.callback_query(F.data == "show_answer")
