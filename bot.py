@@ -1,7 +1,8 @@
 import os
 import re
 import logging
-import sqlite3
+import asyncpg
+from urllib.parse import urlparse
 import asyncio
 from dotenv import load_dotenv
 
@@ -23,6 +24,20 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 # Добавьте в Railway переменную ADMIN_IDS, например "12345678,87654321"
 ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
+# Подключение к PostgreSQL
+db_pool = None
+
+async def create_db_pool():
+    global db_pool
+    url = os.getenv("DATABASE_URL")
+    parsed = urlparse(url)
+    db_pool = await asyncpg.create_pool(
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path.lstrip("/"),
+        host=parsed.hostname,
+        port=parsed.port or 5432
+    )
 
 ########################
 # Настройка OpenAI клиента
@@ -119,12 +134,11 @@ def get_show_answer_menu():
 # Функции работы с базой данных
 ########################
 
-def add_user_to_db(user_id: int, username: str, name: str, age: int):
-    with sqlite3.connect('users.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('''
+async def add_user_to_db(user_id: int, username: str, name: str, age: int):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
-                id INTEGER PRIMARY KEY,
+                id BIGINT PRIMARY KEY,
                 username TEXT,
                 name TEXT,
                 age INTEGER,
@@ -132,38 +146,39 @@ def add_user_to_db(user_id: int, username: str, name: str, age: int):
                 points REAL
             )
         ''')
-        cursor.execute('''
-            INSERT OR IGNORE INTO users (id, username, name, age, level, points)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (user_id, username, name, age, "Junior", 0.0))
-        conn.commit()
+        await conn.execute('''
+            INSERT INTO users (id, username, name, age, level, points)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            ON CONFLICT (id) DO NOTHING
+        ''', user_id, username, name, age, "Junior", 0.0)
 
-def get_user_from_db(user_id: int):
-    with sqlite3.connect('users.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM users WHERE id = ?', (user_id,))
-        return cursor.fetchone()
+async def get_user_from_db(user_id: int):
+    async with db_pool.acquire() as conn:
+        return await conn.fetchrow('SELECT * FROM users WHERE id = $1', user_id)
 
-def update_user_points(user_id: int, additional_points: float):
-    with sqlite3.connect('users.db') as conn:
-        cursor = conn.cursor()
-        cursor.execute('UPDATE users SET points = points + ? WHERE id = ?', (additional_points, user_id))
-        conn.commit()
+async def update_user_points(user_id: int, additional_points: float):
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            'UPDATE users SET points = points + $1 WHERE id = $2',
+            additional_points, user_id
+        )
 
-def update_level(user_id: int):
-    user = get_user_from_db(user_id)
+async def update_level(user_id: int):
+    user = await get_user_from_db(user_id)
     if not user:
         return
-    _, username, name, age, current_level, points = user
+    current_level = user["level"]
+    points = user["points"]
     cur_index = LEVELS.index(current_level)
     required_points = 50 * (cur_index + 1)
     if points >= required_points and cur_index < len(LEVELS) - 1:
         new_level = LEVELS[cur_index + 1]
-        with sqlite3.connect('users.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute('UPDATE users SET level = ? WHERE id = ?', (new_level, user[0]))
-            conn.commit()
-        logging.info(f"Пользователь {user[0]} повышен с {current_level} до {new_level}.")
+        async with db_pool.acquire() as conn:
+            await conn.execute(
+                'UPDATE users SET level = $1 WHERE id = $2',
+                new_level, user_id
+            )
+        logging.info(f"Пользователь {user_id} повышен с {current_level} до {new_level}.")
 
 ########################
 # Состояния
@@ -182,7 +197,7 @@ class TaskState(StatesGroup):
 
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    user = get_user_from_db(message.from_user.id)
+    user = await get_user_from_db(message.from_user.id)
     if user is None:
         # Новый пользователь: показываем логотип и начинаем регистрацию
         await message.answer_photo(
@@ -193,7 +208,7 @@ async def cmd_start(message: Message, state: FSMContext):
         await state.set_state(RegisterState.name)
     else:
         # Зарегистрированному сразу показываем приветствие и главное меню
-        _, username, name, age, level, points = user
+        username, name, age, level, points = user["username"], user["name"], user["age"], user["level"], user["points"]
         await message.answer(f"👋 Привет, {name}!\n{welcome_text}", reply_markup=get_main_menu())
 
 @router.message(RegisterState.name)
@@ -209,7 +224,7 @@ async def process_age(message: Message, state: FSMContext):
         return
     data = await state.get_data()
     name = data.get("name")
-    add_user_to_db(message.from_user.id, message.from_user.username or "", name, int(message.text))
+    await add_user_to_db(message.from_user.id, message.from_user.username or "", name, int(message.text))
     await message.answer(f"✅ Готово, {name}! Добро пожаловать!", reply_markup=get_main_menu())
     await state.clear()
 
@@ -239,13 +254,13 @@ def get_admin_menu():
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats_handler(callback: CallbackQuery):
     try:
-        with sqlite3.connect('users.db') as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT COUNT(*) FROM users")
-            count = cursor.fetchone()[0]
+        async with db_pool.acquire() as conn:
+            row = await conn.fetchrow("SELECT COUNT(*) FROM users")
+            count = row[0]
     except Exception as e:
         logging.error(f"Ошибка получения статистики: {e}")
         count = "не удалось получить статистику"
+    
     text = f"📊 Статистика:\nОбщее количество пользователей: {count}"
     await callback.message.edit_text(text, reply_markup=get_admin_menu())
     await callback.answer()
@@ -257,9 +272,9 @@ async def admin_broadcast_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
-    user = get_user_from_db(callback.from_user.id)
+    user = await get_user_from_db(callback.from_user.id)
     if user:
-        _, username, name, age, level, points = user
+        username, name, age, level, points = user["username"], user["name"], user["age"], user["level"], user["points"]
         text = (
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
@@ -318,12 +333,12 @@ async def task_callback(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("grade_"))
 async def handle_grade_selection(callback: CallbackQuery, state: FSMContext):
     selected_grade = callback.data.replace("grade_", "").strip()
-    user = get_user_from_db(callback.from_user.id)
+    user = await get_user_from_db(callback.from_user.id)
     if not user:
         await callback.message.answer("🚫 Пользователь не найден. Попробуйте /start", reply_markup=get_main_menu())
         await callback.answer()
         return
-    current_level = user[4]
+    current_level = user["level"]
     if selected_grade != current_level:
         await callback.message.answer(
             f"🚫 Доступ запрещён! Ваш текущий уровень: {current_level}.",
@@ -372,11 +387,11 @@ async def handle_task_answer(message: Message, state: FSMContext):
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
-    user = get_user_from_db(message.from_user.id)
+    user = await get_user_from_db(message.from_user.id)
     if not user:
         await message.answer("🚫 Пользователь не найден. Повторите /start.")
         return
-    student_name = user[2]
+    student_name = user["name"]
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
@@ -394,8 +409,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
         feedback_text = feedback_raw.strip()
     if new_score > last_score:
         diff = new_score - last_score
-        update_user_points(message.from_user.id, diff)
-        update_level(message.from_user.id)
+        await update_user_points(message.from_user.id, diff)
+        await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry"),
@@ -561,5 +576,9 @@ async def generate_correct_answer(question: str, grade: str) -> str:
 # Запуск бота
 ########################
 
+async def on_startup():
+    await create_db_pool()
+    await dp.start_polling(bot, skip_updates=True)
+
 if __name__ == "__main__":
-    asyncio.run(dp.start_polling(bot, skip_updates=True))
+    asyncio.run(on_startup())
