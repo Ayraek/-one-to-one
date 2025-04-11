@@ -199,7 +199,7 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     score_text = ""
     feedback_text = ""
 
-    match = re.search(r"Критерии:\n(.*?)\n+Score:\s*([0-9.]+)\n+Feedback:\s*(.+)", feedback_raw, re.DOTALL)
+    match = re.search(r"Критерии:\n([\s\S]+?)Score:\s*([0-9.]+)\s*\nFeedback:\s*(.+)", feedback_raw)
     if match:
         criteria_block = match.group(1).strip()
         new_score = float(match.group(2))
