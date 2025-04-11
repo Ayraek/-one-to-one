@@ -37,7 +37,7 @@ welcome_text = (
     "Нажмите /start, чтобы начать 🔥"
 )
 
-# --- Главное меню ---
+# --- Главное меню и выбор задания ---
 def get_main_menu():
     keyboard = [
         [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")],
@@ -47,6 +47,8 @@ def get_main_menu():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_grades_menu():
+    # Здесь можно задать все варианты, но при обработке выбора мы будем проверять,
+    # совпадает ли выбранный грейд с текущим уровнем пользователя.
     keyboard = [
         [InlineKeyboardButton(text="👶 Junior", callback_data="grade_Junior")],
         [InlineKeyboardButton(text="🧑 Middle", callback_data="grade_Middle")],
@@ -90,10 +92,13 @@ def update_level(user_id):
     user = get_user_from_db(user_id)
     if not user:
         return
+    # Извлекаем текущий уровень и баллы.
     _, username, name, age, current_level, points = user
-    index = LEVELS.index(current_level) if current_level in LEVELS else 0
-    if points >= 50 and index < len(LEVELS) - 1:
-        new_level = LEVELS[index + 1]
+    cur_index = LEVELS.index(current_level) if current_level in LEVELS else 0
+    required_points = 50 * (cur_index + 1)
+    # Если накопленные баллы превышают порог для текущего уровня и есть следующий уровень.
+    if points >= required_points and cur_index < len(LEVELS) - 1:
+        new_level = LEVELS[cur_index + 1]
         with sqlite3.connect('users.db') as conn:
             cursor = conn.cursor()
             cursor.execute('UPDATE users SET level = ? WHERE id = ?', (new_level, user[0]))
@@ -152,7 +157,6 @@ async def profile_callback(callback: types.CallbackQuery):
             cursor.execute('SELECT id FROM users ORDER BY points DESC')
             all_ids = [row[0] for row in cursor.fetchall()]
             rank = all_ids.index(callback.from_user.id) + 1 if callback.from_user.id in all_ids else '—'
-
         text = (
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
@@ -175,6 +179,11 @@ async def help_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(text, reply_markup=get_main_menu())
     await callback.answer()
 
+@router.callback_query(F.data == "main_menu")
+async def main_menu_callback(callback: types.CallbackQuery):
+    # Возвращаем пользователя в профиль (как в callback profile)
+    await profile_callback(callback)
+
 @router.callback_query(F.data == "task")
 async def task_callback(callback: types.CallbackQuery):
     await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
@@ -182,11 +191,24 @@ async def task_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data.startswith("grade_"))
 async def handle_grade_selection(callback: types.CallbackQuery, state: FSMContext):
-    grade = callback.data.replace("grade_", "")
-    question = await generate_question(grade)
+    selected_grade = callback.data.replace("grade_", "").strip()
+    user = get_user_from_db(callback.from_user.id)
+    if not user:
+        await callback.message.answer("🚫 Пользователь не найден. Попробуйте перезапустить /start", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    # Разрешено получение заданий только для текущего грейда студента.
+    current_grade = user[4]  # поле level из базы данных
+    if LEVELS.index(selected_grade) != LEVELS.index(current_grade):
+        await callback.message.answer(f"🚫 Доступ запрещён! Вам доступны задания только для уровня: {current_grade}.", reply_markup=get_main_menu())
+        await callback.answer()
+        return
+
+    question = await generate_question(selected_grade)
     await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=grade, last_score=0.0)
-    await callback.message.edit_text(f"💬 Задание для уровня {grade}:\n\n{question}\n\n✍️ Напиши свой ответ сообщением.")
+    await state.update_data(question=question, grade=selected_grade, last_score=0.0)
+    await callback.message.edit_text(f"💬 Задание для уровня {selected_grade}:\n\n{question}\n\n✍️ Напиши свой ответ сообщением.")
     await callback.answer()
 
 @router.message(TaskState.waiting_for_answer)
@@ -199,22 +221,25 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
     student_name = user[2] if user else "студент"
 
-    # Оценка ответа студента с использованием обновленного шаблона
+    # Оценка ответа с использованием обновленного шаблона
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
-    criteria_block = ""
-    feedback_text = ""
-
-    match = re.search(r"Критерии:\n([\s\S]+?)Score:\s*([0-9.]+)\s*\nFeedback:\s*(.+)", feedback_raw)
+    # Обновлённый паттерн для извлечения критериев, Score и Feedback
+    match = re.search(r"Критерии:\s*([\s\S]+?)Score:\s*([0-9.]+)\s*[\n\r]+Feedback:\s*(.+)", feedback_raw)
     if match:
         criteria_block = match.group(1).strip()
-        new_score = float(match.group(2))
+        try:
+            new_score = float(match.group(2))
+        except Exception:
+            new_score = 0.0
         feedback_text = match.group(3).strip()
     else:
+        criteria_block = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
+    # Обновляем баллы и уровень, если новая оценка выше предыдущей
     if new_score > last_score:
         diff = new_score - last_score
         update_user_points(message.from_user.id, diff)
@@ -273,13 +298,15 @@ async def retry_question(callback: types.CallbackQuery, state: FSMContext):
 
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
-
     await callback.message.answer(f"✍️ Повтори, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
     await callback.answer()
 
 # --- OpenAI функции ---
 async def generate_question(grade: str) -> str:
-    prompt = f"Сгенерируй реалистичный вопрос для продакт-менеджера уровня {grade}. Вопрос должен быть понятным, конкретным и проверять базовые знания."
+    prompt = (
+        f"Сгенерируй реалистичный вопрос для продакт-менеджера уровня {grade}. "
+        "Вопрос должен быть понятным, конкретным и проверять базовые знания."
+    )
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -306,10 +333,10 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         "3. Аргументация\n"
         "4. Структура\n"
         "5. Примеры\n\n"
-        "Для каждого критерия выбери один из вариантов: ✅, ⚠️, или ❌.\n"
-        "После оценки по каждому критерию ОБЯЗАТЕЛЬНО выведи строку, начинающуюся с 'Score:' с итоговой числовой оценкой от 0 до 1.\n"
-        "Затем выведи строку, начинающуюся с 'Feedback:' с подробным анализом, при этом обратись к студенту от первого лица, начиная с фразы 'Ваш ответ ...'.\n\n"
-        "Ответ должен соответствовать следующему формату (без дополнительных комментариев):\n\n"
+        "Для каждого критерия выбери один из вариантов: ✅, ⚠️ или ❌.\n"
+        "После оценки по каждому критерию ОБЯЗАТЕЛЬНО выведи строку, начинающуюся с 'Score:' с итоговой числовой оценкой от 0 до 1 (например, Score: 0.5). \n"
+        "Затем выведи строку, начинающуюся с 'Feedback:' и предоставь подробный анализ, обращаясь от первого лица к студенту, начиная с фразы 'Ваш ответ...'.\n\n"
+        "Ответ должен строго соответствовать следующему формату (без дополнительных комментариев):\n\n"
         "Критерии:\n"
         "- Соответствие вопросу: <эмодзи>\n"
         "- Полнота: <эмодзи>\n"
@@ -339,7 +366,7 @@ async def generate_correct_answer(question: str, grade: str) -> str:
     prompt = (
         f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
         f"Вопрос: {question}\n\n"
-        "Объясни ключевые моменты, приведи примеры, почему это правильно. Ответ от первого лица, обращайся к студенту как 'Ваш ответ ...'."
+        "Объясни ключевые моменты, приведи примеры, почему это правильно. Отвечай от первого лица, обращаясь к студенту как 'Ваш ответ...'."
     )
     try:
         response = await asyncio.to_thread(
