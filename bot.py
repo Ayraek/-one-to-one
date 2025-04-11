@@ -20,7 +20,7 @@ from aiogram.fsm.state import StatesGroup, State
 load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# Добавьте в Railway в переменные окружения ADMIN_IDS, например: "12345678,87654321"
+# Добавьте в Railway переменную ADMIN_IDS, например "12345678,87654321"
 ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
@@ -107,6 +107,14 @@ def get_news_menu():
     keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
+def get_show_answer_menu():
+    """Формирует меню для показа эталонного ответа с двумя кнопками."""
+    keyboard = [
+        [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="next_question")],
+        [InlineKeyboardButton(text="🏠 Вернуться в главное меню", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
 ########################
 # Функции работы с базой данных
 ########################
@@ -172,7 +180,6 @@ class TaskState(StatesGroup):
 # Основные команды и обработчики
 ########################
 
-# Обработчик команды /start
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
@@ -214,7 +221,6 @@ async def cmd_ping(message: Message):
 # Админка
 ########################
 
-# Команда /admin для администраторов
 @router.message(lambda message: message.text == "/admin")
 async def admin_panel(message: Message, state: FSMContext):
     if message.from_user.id not in admin_ids:
@@ -266,7 +272,7 @@ async def main_menu_callback(callback: CallbackQuery):
     await callback.answer()
 
 ########################
-# Обработка главного меню и разделы
+# Обработка разделов "Новости" и "Экзамен"
 ########################
 
 @router.callback_query(F.data == "news")
@@ -301,7 +307,7 @@ def get_exam_menu():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 ########################
-# Получение задания (выбор грейда и темы)
+# Получение задания: выбор грейда и темы
 ########################
 
 @router.callback_query(F.data == "task")
@@ -347,7 +353,9 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, last_score=0.0)
     await callback.message.edit_text(
-        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\n✍️ Напишите свой ответ сообщением."
+        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
+        f"{question}\n\n"
+        "✍️ Напишите свой ответ сообщением."
     )
     await callback.answer()
 
@@ -410,6 +418,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard)
     await state.update_data(last_question=question, last_grade=grade)
 
+########################
+# Обработка кнопки "Показать правильный ответ"
+########################
+
 @router.callback_query(F.data == "show_answer")
 async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -420,9 +432,23 @@ async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     correct = await generate_correct_answer(question, grade)
-    await callback.message.answer(f"✅ Эталонный ответ уровня {grade}:\n\n{correct}", parse_mode="HTML", reply_markup=get_main_menu())
+    # Используем обновлённое меню с кнопками "Следующий вопрос" и "Вернуться в главное меню"
+    await callback.message.answer(
+        f"✅ Эталонный ответ уровня {grade}:\n\n{correct}",
+        parse_mode="HTML",
+        reply_markup=get_show_answer_menu()
+    )
     await callback.answer()
 
+# Обработчик кнопки "Следующий вопрос"
+@router.callback_query(F.data == "next_question")
+async def next_question_handler(callback: CallbackQuery, state: FSMContext):
+    # Очищаем состояние, переходим к выбору задания (грейда)
+    await state.clear()
+    await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
+    await callback.answer()
+
+# Обработчик кнопки "Попробовать снова" (retry)
 @router.callback_query(F.data == "retry")
 async def retry_question(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
@@ -455,7 +481,7 @@ async def generate_question(grade: str, topic: str) -> str:
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты генерируешь краткие вопросы для продакт-менеджеров. Не используй символ *. Максимальная длина – 800 символов."},
+                {"role": "system", "content": "Ты генерируешь краткие вопросы для продакт-менеджеров. Не используй символ * (звёздочка). Максимальная длина – 800 символов."},
                 {"role": "user", "content": prompt}
             ],
             max_tokens=250,
