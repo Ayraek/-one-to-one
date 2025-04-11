@@ -47,10 +47,6 @@ def get_main_menu():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_grades_menu():
-    """
-    Отображаем все уровни, но при выборе бот проверит,
-    соответствует ли выбранный грейд уровню студента.
-    """
     keyboard = [
         [InlineKeyboardButton(text="👶 Junior", callback_data="grade_Junior")],
         [InlineKeyboardButton(text="🧑 Middle", callback_data="grade_Middle")],
@@ -99,9 +95,7 @@ def update_level(user_id):
     Логика перехода на следующий уровень:
     - Junior (индекс 0) требует 50 баллов
     - Middle (индекс 1) требует 100 баллов
-    - Senior (индекс 2) требует 150 баллов
-    ...
-    Порог = 50 * (индекс уровня + 1).
+    - Senior (индекс 2) требует 150 баллов и т.д.
     """
     user = get_user_from_db(user_id)
     if not user:
@@ -132,6 +126,11 @@ class TaskState(StatesGroup):
 async def cmd_start(message: types.Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
     if user is None:
+        # Новый пользователь видит логотип и приветственное сообщение при регистрации.
+        await message.answer_photo(
+            photo="https://i.imgur.com/zIPzQKF.jpeg",
+            caption="Добро пожаловать в One to One IT Academy!"
+        )
         await message.answer("👋 Давай знакомимся! Как тебя зовут?")
         await state.set_state(RegisterState.name)
     else:
@@ -153,6 +152,7 @@ async def process_age(message: types.Message, state: FSMContext):
     data = await state.get_data()
     name = data.get("name")
     add_user_to_db(message.from_user.id, message.from_user.username, name, int(message.text))
+    # Новый пользователь уже видел логотип, далее просто подтверждаем регистрацию.
     await message.answer(f"✅ Готово, {name}! Добро пожаловать!", reply_markup=get_main_menu())
     await state.clear()
 
@@ -184,10 +184,7 @@ async def profile_callback(callback: types.CallbackQuery):
         f"<b>🏆 Место в рейтинге:</b> {rank}"
     )
 
-    await callback.message.answer_photo(
-        photo="https://i.imgur.com/zIPzQKF.jpeg",
-        caption="Добро пожаловать в One to One IT Academy!"
-    )
+    # Логотип не выводим для зарегистрированных пользователей
     await callback.message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
     await callback.answer()
 
@@ -199,15 +196,11 @@ async def help_callback(callback: types.CallbackQuery):
 
 @router.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
-    # Возвращаем пользователя в профиль
     await profile_callback(callback)
 
 @router.callback_query(F.data == "task")
 async def task_callback(callback: types.CallbackQuery):
-    await callback.message.edit_text(
-        "Выберите грейд, для которого хотите получить задание:",
-        reply_markup=get_grades_menu()
-    )
+    await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("grade_"))
@@ -219,8 +212,7 @@ async def handle_grade_selection(callback: types.CallbackQuery, state: FSMContex
         await callback.answer()
         return
 
-    current_grade = user[4]  # level из БД
-    # Разрешаем задания только для ТЕКУЩЕГО уровня.
+    current_grade = user[4]  # уровень пользователя из БД
     if LEVELS.index(selected_grade) != LEVELS.index(current_grade):
         await callback.message.answer(
             f"🚫 Доступ запрещён! Вам доступны задания только для уровня: {current_grade}.",
@@ -251,12 +243,11 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         await message.answer("🚫 Пользователь не найден. Повторите /start.")
         return
 
-    student_name = user[2] if user else "студент"
+    student_name = user[2]
 
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
-    # Пытаемся извлечь критерии, оценку и фидбэк
     match = re.search(
         r"Критерии:\s*([\s\S]+?)Score:\s*([\d.]+)\s*[\r\n]+Feedback:\s*(.+)",
         feedback_raw
@@ -270,19 +261,16 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
             new_score = 0.0
         feedback_text = match.group(3).strip()
     else:
-        # Если формат не совпал
         criteria_block = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Обновляем баллы, если новая оценка больше предыдущей
     if new_score > last_score:
         diff = new_score - last_score
         update_user_points(message.from_user.id, diff)
         update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    # Формируем сообщение-результат
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry"),
@@ -294,11 +282,9 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
-    # Добавляем отображение фактического числа баллов (Score)
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    # Если сообщение слишком длинное - разбиваем на части
     if len(result_msg) > 4000:
         chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
         for i, chunk in enumerate(chunks):
@@ -337,18 +323,13 @@ async def retry_question(callback: types.CallbackQuery, state: FSMContext):
     grade = data.get("last_grade")
 
     if not question or not grade:
-        await callback.message.answer(
-            "⚠️ Ошибка: нет сохранённого задания.",
-            reply_markup=get_main_menu()
-        )
+        await callback.message.answer("⚠️ Ошибка: нет сохранённого задания.", reply_markup=get_main_menu())
         await callback.answer()
         return
 
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
-    await callback.message.answer(
-        f"✍️ Повторите, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}"
-    )
+    await callback.message.answer(f"✍️ Повторите, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
     await callback.answer()
 
 # --- OpenAI функции ---
@@ -362,14 +343,8 @@ async def generate_question(grade: str) -> str:
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {
-                    "role": "system",
-                    "content": "Ты помогаешь генерировать вопросы для продакт-менеджеров."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "Ты помогаешь генерировать вопросы для продакт-менеджеров."},
+                {"role": "user", "content": prompt}
             ],
             max_tokens=100,
             temperature=0.7
@@ -380,10 +355,6 @@ async def generate_question(grade: str) -> str:
         return "❌ Ошибка генерации вопроса."
 
 async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
-    """
-    Обращаем особое внимание на требование выдавать частичные баллы (например, 0.3, 0.6 и т.д.),
-    если ответ неполный, но имеет разумную часть правильной информации.
-    """
     prompt = (
         f"Вопрос: {question}\n"
         f"Ответ студента: {student_answer}\n\n"
@@ -395,9 +366,7 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         "5. Примеры\n\n"
         "Для каждого критерия выбери один из вариантов: ✅, ⚠️ или ❌.\n"
         "Определи итоговую оценку (Score) от 0.0 до 1.0.\n"
-        "- 0.0, если ответ совсем неверен.\n"
-        "- 1.0, если ответ полностью точен.\n"
-        "- Если ответ частично верный, выбери дробное число от 0.1 до 0.9.\n\n"
+        "Если ответ частично верный, используй дробное число (например, 0.5).\n\n"
         "Выведи результат строго в формате:\n\n"
         "Критерии:\n"
         "- Соответствие вопросу: <эмоджи>\n"
@@ -413,17 +382,8 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Ты преподаватель, который строго оценивает ответы по заданному шаблону. "
-                        "Не добавляй лишних слов вне формата."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "Ты преподаватель, строго оценивающий ответы студентов по заданному шаблону. Не добавляй лишних комментариев."},
+                {"role": "user", "content": prompt}
             ],
             max_tokens=450,
             temperature=0.3
@@ -437,22 +397,16 @@ async def generate_correct_answer(question: str, grade: str) -> str:
     prompt = (
         f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ на вопрос для уровня {grade}.\n\n"
         f"Вопрос: {question}\n\n"
-        "Объясни ключевые моменты, приведи примеры, почему это правильно. "
-        "Ответ должен идти от первого лица, обращаясь к студенту как 'Ваш ответ...'."
+        "Объясни ключевые моменты и приведи примеры, почему ответ правильный. "
+        "Отвечай от первого лица, обращаясь к студенту как 'Ваш ответ...'."
     )
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {
-                    "role": "system",
-                    "content": "Ты генерируешь подробные правильные ответы для студентов."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "system", "content": "Ты генерируешь подробные правильные ответы для студентов."},
+                {"role": "user", "content": prompt}
             ],
             max_tokens=300,
             temperature=0.7
