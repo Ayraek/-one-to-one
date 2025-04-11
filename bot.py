@@ -193,10 +193,8 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     student_name = user[2] if user else "студент"
 
     feedback_raw = await evaluate_answer(question, message.text, student_name)
+    logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
-    logging.info(f"RAW_FEEDBACK:\n{feedback_raw}")
-
-    # Разделим критерии, оценку и комментарий
     criteria_block = ""
     score_text = ""
     feedback_text = ""
@@ -216,7 +214,6 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    # Сохраняем последний вопрос и грейд в state для показа ответа или повтора
     await state.update_data(last_question=question, last_grade=grade)
 
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
@@ -227,7 +224,6 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
-    # Сформируем сообщение
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📋 Критерии оценки:</b>\n<pre>{criteria_block}</pre>\n\n"
@@ -242,8 +238,6 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
                 await message.answer(chunk, parse_mode="HTML")
     else:
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard)
-
-    # Очищать не будем, чтобы retry и show_answer могли использовать state
 
 @router.callback_query(F.data == "show_answer")
 async def show_correct_answer(callback: types.CallbackQuery, state: FSMContext):
@@ -302,7 +296,8 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         "- Структура: <эмодзи>\n"
         "- Примеры: <эмодзи>\n\n"
         "Score: <число от 0 до 1>\n"
-        "Feedback: <подробный фидбэк>"
+        "Feedback: <подробный фидбэк>\n\n"
+        "Внимание: строго соблюдай формат. Не добавляй никакого текста до или после."
     )
     try:
         response = await asyncio.to_thread(
