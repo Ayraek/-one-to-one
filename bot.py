@@ -192,10 +192,21 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     user = get_user_from_db(message.from_user.id)
     student_name = user[2] if user else "студент"
 
-    feedback = await evaluate_answer(question, message.text, student_name)
+    feedback_raw = await evaluate_answer(question, message.text, student_name)
 
-    match = re.search(r"Score:\s*([0-9.]+)", feedback)
-    new_score = float(match.group(1)) if match else 0.0
+    # Разделим критерии, оценку и комментарий
+    criteria_block = ""
+    score_text = ""
+    feedback_text = ""
+
+    match = re.search(r"Критерии:\n(.*?)\n+Score:\s*([0-9.]+)\n+Feedback:\s*(.+)", feedback_raw, re.DOTALL)
+    if match:
+        criteria_block = match.group(1).strip()
+        new_score = float(match.group(2))
+        feedback_text = match.group(3).strip()
+    else:
+        new_score = 0.0
+        feedback_text = feedback_raw
 
     if new_score > last_score:
         diff = new_score - last_score
@@ -214,15 +225,21 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
-    if len(feedback) > 4000:
-        chunks = [feedback[i:i+4000] for i in range(0, len(feedback), 4000)]
+    # Сформируем сообщение
+    result_msg = ""
+    if criteria_block:
+        result_msg += f"📊 <b>Оценка по критериям:</b>\n<pre>{criteria_block}</pre>\n\n"
+    result_msg += f"<b>Обратная связь:</b>\n{feedback_text}"
+
+    if len(result_msg) > 4000:
+        chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
         for i, chunk in enumerate(chunks):
             if i == len(chunks) - 1:
-                await message.answer(chunk, reply_markup=keyboard)
+                await message.answer(chunk, parse_mode="HTML", reply_markup=keyboard)
             else:
-                await message.answer(chunk)
+                await message.answer(chunk, parse_mode="HTML")
     else:
-        await message.answer(f"📊 Оценка ответа:\n{feedback}", reply_markup=keyboard)
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard)
 
     # Очищать не будем, чтобы retry и show_answer могли использовать state
 
