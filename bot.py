@@ -196,7 +196,6 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
     criteria_block = ""
-    score_text = ""
     feedback_text = ""
 
     match = re.search(r"Критерии:\n([\s\S]+?)Score:\s*([0-9.]+)\s*\nFeedback:\s*(.+)", feedback_raw)
@@ -206,7 +205,7 @@ async def handle_task_answer(message: types.Message, state: FSMContext):
         feedback_text = match.group(3).strip()
     else:
         new_score = 0.0
-        feedback_text = feedback_raw
+        feedback_text = feedback_raw.strip()
 
     if new_score > last_score:
         diff = new_score - last_score
@@ -308,7 +307,7 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
                 {"role": "user", "content": prompt}
             ],
             max_tokens=400,
-            temperature=0.5
+            temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
