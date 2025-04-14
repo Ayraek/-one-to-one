@@ -590,14 +590,14 @@ async def clarify_after_answer(message: Message, state: FSMContext):
 @router.message(F.text == "✅ Показать правильный ответ")
 async def show_correct_answer(message: Message, state: FSMContext):
     data = await state.get_data()
-    # Используем данные, сохранённые после оценки (last_question/last_grade)
-    question = data.get("last_question")
-    grade = data.get("last_grade")
-    if not question or not grade:
+    last_question = data.get("last_question")
+    last_grade = data.get("last_grade")
+    
+    if not last_question or not last_grade:
         await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
         return
-
-    correct_answer = await generate_correct_answer(question, grade)
+    
+    correct_answer = await generate_correct_answer(last_question, last_grade)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➡️ Следующий вопрос")],
@@ -606,8 +606,9 @@ async def show_correct_answer(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
+    
     await message.answer(
-        f"✅ Эталонный ответ уровня {grade}:\n\n{correct_answer}",
+        f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -701,13 +702,12 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
         return "❌ Ошибка оценки ответа."
 
 async def generate_correct_answer(question: str, grade: str) -> str:
-    # <-- Изменено! Добавлена инструкция "не здоровайся"
     prompt = (
-        f"Ты опытный преподаватель продакт-менеджмента. Дай подробный правильный ответ для уровня {grade}.\n\n"
-        f"Вопрос: {question}\n\n"
-        "Развернуто объясни ключевые моменты и приведи примеры. "
-        "Пиши от первого лица, обращаясь к студенту на «Вы», но не здоровайся, никаких «Привет!». "
-        "Не используй звездочки."
+        f"Ты опытный преподаватель продакт-менеджмента. "
+        f"Дай подробный правильный ответ для уровня {grade} на следующий вопрос:\n\n"
+        f"{question}\n\n"
+        "Пожалуйста, приведи только эталонное решение без оценок, комментариев, приветствий или повторов. "
+        "Верни только ответ, структурированный и исчерпывающий ключевые моменты."
     )
     try:
         response = await asyncio.to_thread(
@@ -716,17 +716,18 @@ async def generate_correct_answer(question: str, grade: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "Ты генерируешь подробные правильные ответы, не здоровайся, говори по сути."
+                    "content": "Ты генерируешь подробные правильные ответы для студентов. Не добавляй оценок, приветствий или лишних пояснений."
                 },
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,
+            max_tokens=1000,  # при необходимости можно увеличить количество токенов
             temperature=0.7
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Ошибка генерации эталонного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
+
 
 ########################
 # Запуск бота
