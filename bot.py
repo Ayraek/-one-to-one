@@ -1,109 +1,44 @@
 import os
-from dotenv import load_dotenv
-
-load_dotenv()
-API_TOKEN = os.getenv("API_TOKEN")
-
 import re
 import logging
 import asyncpg
-from urllib.parse import urlparse
 import asyncio
+from urllib.parse import urlparse
+
 from dotenv import load_dotenv
+load_dotenv()
 
 from openai import OpenAI
 
-from aiogram import Bot, Dispatcher, Router, F
-
-bot = Bot(token=API_TOKEN)
-dp = Dispatcher()
-router = Router()
-dp.include_router(router)
-
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from aiogram import Bot, Dispatcher, Router, F, types
+from aiogram.types import (
+    Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+    ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+)
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
-from aiogram import types
 
-########################
-# 
-########################
-
-@router.callback_query(F.data == "start_answering")
-async def start_answering(callback: CallbackQuery):
-    await callback.message.answer(
-        "✏️ Напишите свой ответ сообщением.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    await callback.answer()
-
-
-########################
 # Загрузка переменных окружения
-########################
-
-load_dotenv()
 API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-# Добавьте в Railway переменную ADMIN_IDS, например "12345678,87654321"
 ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
-# Подключение к PostgreSQL
-db_pool = None
 
-async def create_db_pool():
-    global db_pool
-    url = os.getenv("DATABASE_URL")
-    parsed = urlparse(url)
-    db_pool = await asyncpg.create_pool(
-        user=parsed.username,
-        password=parsed.password,
-        database=parsed.path.lstrip("/"),
-        host=parsed.hostname,
-        port=parsed.port or 5432
-    )
-
-    # Автоматически создаём таблицу users при старте
-    async with db_pool.acquire() as conn:
-        await conn.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id BIGINT PRIMARY KEY,
-                username TEXT,
-                name TEXT,
-                age INTEGER,
-                level TEXT,
-                points REAL
-            )
-        ''')
-
-
-########################
 # Настройка OpenAI клиента
-########################
-
 client = OpenAI(api_key=OPENAI_API_KEY)
 
-########################
 # Настройка логирования
-########################
-
 logging.basicConfig(level=logging.INFO)
 
-########################
-# Инициализация бота/диспетчера
-########################
-
+# Инициализация бота/диспетчера (однократно, с хранилищем состояний)
 bot = Bot(token=API_TOKEN)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
 
-########################
 # Глобальные переменные
-########################
-
 LEVELS = ["Junior", "Middle", "Senior", "Head of Product", "CPO", "CEO"]
 
 welcome_text = (
@@ -168,31 +103,45 @@ def get_show_answer_menu():
         [InlineKeyboardButton(text="🏠 Вернуться в главное меню", callback_data="main_menu")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
-@router.callback_query(F.data == "profile")
-async def show_profile(callback: CallbackQuery):
-    user = await get_user_from_db(callback.from_user.id)
-    if user:
-        username = user["username"]
-        name = user["name"]
-        age = user["age"]
-        level = user["level"]
-        points = user["points"]
-        text = (
-            f"<b>👤 Имя:</b> {name}\n"
-            f"<b>🎂 Возраст:</b> {age}\n"
-            f"<b>🎯 Уровень:</b> {level}\n"
-            f"<b>⭐ Баллы:</b> {points}\n"
-        )
-        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
-    else:
-        await callback.message.edit_text(welcome_text, reply_markup=get_main_menu())
-    await callback.answer()
+
+def get_admin_menu():
+    keyboard = [
+        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="💬 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 ########################
-# Функции работы с базой данных
+# Состояния
 ########################
 
-async def add_user_to_db(user_id: int, username: str, name: str, age: int):
+class RegisterState(StatesGroup):
+    name = State()
+    age = State()
+
+class TaskState(StatesGroup):
+    waiting_for_answer = State()
+    waiting_for_clarification = State()
+
+########################
+# Подключение к PostgreSQL
+########################
+
+db_pool = None
+
+async def create_db_pool():
+    global db_pool
+    url = os.getenv("DATABASE_URL")
+    parsed = urlparse(url)
+    db_pool = await asyncpg.create_pool(
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path.lstrip("/"),
+        host=parsed.hostname,
+        port=parsed.port or 5432
+    )
+    # Создаём таблицу users при старте
     async with db_pool.acquire() as conn:
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS users (
@@ -204,6 +153,13 @@ async def add_user_to_db(user_id: int, username: str, name: str, age: int):
                 points REAL
             )
         ''')
+
+########################
+# Функции работы с базой данных
+########################
+
+async def add_user_to_db(user_id: int, username: str, name: str, age: int):
+    async with db_pool.acquire() as conn:
         await conn.execute('''
             INSERT INTO users (id, username, name, age, level, points)
             VALUES ($1, $2, $3, $4, $5, $6)
@@ -239,26 +195,21 @@ async def update_level(user_id: int):
         logging.info(f"Пользователь {user_id} повышен с {current_level} до {new_level}.")
 
 ########################
-# Состояния
-########################
-
-class RegisterState(StatesGroup):
-    name = State()
-    age = State()
-
-class TaskState(StatesGroup):
-    waiting_for_answer = State()
-    waiting_for_clarification = State()
-
-########################
 # Основные команды и обработчики
 ########################
+
+@router.callback_query(F.data == "start_answering")
+async def start_answering(callback: CallbackQuery):
+    await callback.message.answer(
+        "✏️ Напишите свой ответ сообщением.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await callback.answer()
 
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     user = await get_user_from_db(message.from_user.id)
     if user is None:
-        # Новый пользователь: показываем логотип и начинаем регистрацию
         await message.answer_photo(
             photo="https://i.imgur.com/zIPzQKF.jpeg",
             caption="Добро пожаловать в One to One IT Academy!"
@@ -266,7 +217,6 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer("👋 Как тебя зовут?")
         await state.set_state(RegisterState.name)
     else:
-        # Зарегистрированному сразу показываем приветствие и главное меню
         username, name, age, level, points = user["username"], user["name"], user["age"], user["level"], user["points"]
         await message.answer(f"👋 Привет, {name}!\n{welcome_text}", reply_markup=get_main_menu())
 
@@ -301,14 +251,6 @@ async def admin_panel(message: Message, state: FSMContext):
         await message.answer("🚫 У вас нет прав администратора.")
         return
     await message.answer("👑 Добро пожаловать в админ-панель.", reply_markup=get_admin_menu())
-
-def get_admin_menu():
-    keyboard = [
-        [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="💬 Рассылка", callback_data="admin_broadcast")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 @router.callback_query(F.data == "admin_stats")
 async def admin_stats_handler(callback: CallbackQuery):
@@ -363,10 +305,6 @@ async def news_callback(callback: CallbackQuery):
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_news_menu())
     await callback.answer()
 
-def get_news_menu():
-    keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
 @router.callback_query(F.data == "exam")
 async def exam_callback(callback: CallbackQuery):
     text = (
@@ -375,10 +313,6 @@ async def exam_callback(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_exam_menu())
     await callback.answer()
-
-def get_exam_menu():
-    keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 ########################
 # Получение задания: выбор грейда и темы
@@ -414,46 +348,36 @@ async def back_to_grades(callback: CallbackQuery):
     await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
     await callback.answer()
 
+# Обработчик выбора темы (единственный, без дублирования)
 @router.callback_query(F.data.startswith("topic_"))
 async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     chosen_topic = callback.data.replace("topic_", "").strip()
     data = await state.get_data()
     selected_grade = data.get("selected_grade")
     user = await get_user_from_db(callback.from_user.id)
-
     if not selected_grade or not user:
-        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь.", reply_markup=get_grades_menu())
+        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
+        await callback.answer()
         return
-
     question = await generate_question(selected_grade, chosen_topic, user["name"])
-
     await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(
-    question=question,
-    grade=selected_grade,
-    selected_topic=chosen_topic,
-    last_score=0.0
-)
-
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✍️ Ответить")],
-            [KeyboardButton(text="❓ Уточнить по вопросу")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
+    await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
+    # Используем inline-клавиатуру для единообразия
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Ответить", callback_data="start_answering")],
+        [InlineKeyboardButton(text="❓ Уточнить информацию", callback_data="clarify_info")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
     await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
         f"{question}\n\n"
-        "Что вы хотите сделать?",
+        "Что хотите сделать?",
         reply_markup=keyboard
     )
+    await callback.answer()
 
 ########################
-# Обработка кнопки "Уточнить информацию"
+# Обработка кнопок/сообщений для решения задания
 ########################
 
 @router.message(F.text == "➡️ Следующий вопрос")
@@ -469,7 +393,6 @@ async def ask_next_question(message: Message, state: FSMContext):
         return
 
     question = await generate_question(grade, topic, name)
-
     await state.update_data(question=question)
     await message.answer(
         f"💬 Новый вопрос для {grade} по теме «{topic}»:\n\n"
@@ -496,13 +419,10 @@ async def show_correct_answer(message: Message, state: FSMContext):
     data = await state.get_data()
     question = data.get("question")
     grade = data.get("grade")
-
     if not question or not grade:
         await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
         return
-
     correct_answer = await generate_correct_answer(question, grade)
-
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➡️ Следующий вопрос")],
@@ -511,7 +431,6 @@ async def show_correct_answer(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-
     await message.answer(
         f"✅ Эталонный ответ уровня {grade}:\n\n{correct_answer}",
         parse_mode="HTML",
@@ -521,7 +440,6 @@ async def show_correct_answer(message: Message, state: FSMContext):
 @router.message(F.text == "🏠 Главное меню")
 async def go_to_main_menu(message: Message):
     user = await get_user_from_db(message.from_user.id)
-
     if user:
         _, username, name, age, level, points = user.values()
         text = (
@@ -533,31 +451,27 @@ async def go_to_main_menu(message: Message):
         )
     else:
         text = welcome_text
-
     await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
 
 @router.message(F.text == "✍️ Ответить")
 async def ask_for_answer(message: Message, state: FSMContext):
     await message.answer("✏️ Напишите свой ответ сообщением.")
     await state.set_state(TaskState.waiting_for_answer)
-    
+
 @router.message(TaskState.waiting_for_clarification)
 async def process_clarification(message: Message, state: FSMContext):
     data = await state.get_data()
     question = data.get("question")
     user = await get_user_from_db(message.from_user.id)
     name = user["name"] if user else "кандидат"
-
     if not question:
         await message.answer("⚠️ Не найден исходный вопрос.")
         return
-
     clarification_prompt = (
         f"Вопрос: {question}\n"
         f"Уточнение от кандидата {name}:\n{message.text.strip()}\n\n"
         f"Ответь дружелюбно и по существу. Без повторов и вступлений."
     )
-
     try:
         clarification_response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -567,10 +481,7 @@ async def process_clarification(message: Message, state: FSMContext):
                     "role": "system",
                     "content": "Ты проводишь интервью. Отвечай строго по сути, вежливо и живо. Не повторяй вопрос, не используй шаблоны."
                 },
-                {
-                    "role": "user",
-                    "content": clarification_prompt
-                }
+                {"role": "user", "content": clarification_prompt}
             ],
             max_tokens=300,
             temperature=0.5
@@ -579,7 +490,6 @@ async def process_clarification(message: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Ошибка при уточнении: {e}")
         reply = "❌ Не удалось получить ответ. Попробуйте снова."
-
     reply_keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="✍️ Ответить")],
@@ -588,7 +498,6 @@ async def process_clarification(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-
     await message.answer(f"📎 Уточнение:\n{reply}\n\nЧто делаем дальше?", reply_markup=reply_keyboard)
     await state.set_state(TaskState.waiting_for_answer)
 
@@ -599,15 +508,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
     user = await get_user_from_db(message.from_user.id)
-
     if not grade or not question or not user:
         await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
         return
-
     student_name = user["name"]
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
-
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
@@ -621,20 +527,16 @@ async def handle_task_answer(message: Message, state: FSMContext):
         criteria_block = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
-
     if new_score > last_score:
         diff = new_score - last_score
         await update_user_points(message.from_user.id, diff)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
-
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
-
-    # ✅ Клавиатура с действиями после оценки
     keyboard_after_answer = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➡️ Следующий вопрос")],
@@ -644,7 +546,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-
     if len(result_msg) > 4000:
         chunks = [result_msg[i:i + 4000] for i in range(0, len(result_msg), 4000)]
         for chunk in chunks:
@@ -652,15 +553,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("Что дальше?", reply_markup=keyboard_after_answer)
     else:
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard_after_answer)
-
     await state.update_data(last_question=question, last_grade=grade)
 
-########################
-# Обработка кнопки "Показать правильный ответ"
-########################
-
 @router.callback_query(F.data == "show_answer")
-async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
+async def show_correct_answer_callback(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     question = data.get("last_question")
     grade = data.get("last_grade")
@@ -669,7 +565,6 @@ async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
     correct = await generate_correct_answer(question, grade)
-    # Используем обновлённое меню с кнопками "Следующий вопрос" и "Вернуться в главное меню"
     await callback.message.answer(
         f"✅ Эталонный ответ уровня {grade}:\n\n{correct}",
         parse_mode="HTML",
@@ -678,7 +573,7 @@ async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.callback_query(F.data == "clarify_info")
-async def clarify_info(callback: CallbackQuery, state: FSMContext):
+async def clarify_info_callback(callback: CallbackQuery, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
     await callback.message.answer(
         "✏️ Напишите, что именно хотите уточнить по заданию:",
@@ -686,57 +581,17 @@ async def clarify_info(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# Обработчик кнопки "Следующий вопрос"
 @router.callback_query(F.data == "next_question")
 async def next_question_handler(callback: CallbackQuery, state: FSMContext):
-    # Очищаем состояние, переходим к выбору задания (грейда)
     await state.clear()
     await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
     await callback.answer()
-
-# Обработчик кнопки "Попробовать снова" (retry)
-@router.callback_query(F.data.startswith("topic_"))
-async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
-    chosen_topic = callback.data.replace("topic_", "").strip()
-    data = await state.get_data()
-    selected_grade = data.get("selected_grade")
-    user = await get_user_from_db(callback.from_user.id)
-
-    if not selected_grade or not user:
-        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
-        await callback.answer()
-        return
-
-    question = await generate_question(selected_grade, chosen_topic, user["name"])
-
-    await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=selected_grade, last_score=0.0)
-
-    # 👇 ВСТАВКА: Показываем вопрос + кнопки
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Ответить", callback_data="start_answering")],
-        [InlineKeyboardButton(text="❓ Уточнить информацию", callback_data="clarify_info")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-
-    await callback.message.answer(
-        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
-        f"{question}\n\n"
-        "Что хотите сделать?",
-        reply_markup=keyboard
-    )
-    await callback.answer()
-
 
 ########################
 # Функции для работы с OpenAI
 ########################
 
 async def generate_question(grade: str, topic: str, name: str) -> str:
-    """
-    Генерирует реалистичный вопрос на собеседовании по заданной теме и грейду.
-    Вопрос должен быть живым, с кейсовой формулировкой, до 800 символов.
-    """
     prompt = (
         f"Ты опытный интервьюер по найму продакт-менеджеров в ИТ-компанию (например, Яндекс, Сбер, VK, Ozon).\n"
         f"Твоя задача — задать реалистичный, живой вопрос кандидату уровня {grade} по теме «{topic}».\n\n"
@@ -747,7 +602,6 @@ async def generate_question(grade: str, topic: str, name: str) -> str:
         f"• чем измеришь успех функции?\n"
         f"Можно использовать эмодзи. Не используй символ * (звездочку). Максимум — 800 символов."
     )
-
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -757,10 +611,7 @@ async def generate_question(grade: str, topic: str, name: str) -> str:
                     "role": "system",
                     "content": "Ты интервьюер по продукту. Генерируй короткие, реалистичные и живые кейс-вопросы. Не пиши шаблонно. Не используй *."
                 },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
+                {"role": "user", "content": prompt}
             ],
             max_tokens=300,
             temperature=0.7
