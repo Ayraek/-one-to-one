@@ -490,6 +490,33 @@ async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
     await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
 
+@router.message(F.text == "✅ Показать правильный ответ")
+async def show_correct_answer(message: Message, state: FSMContext):
+    data = await state.get_data()
+    question = data.get("question")
+    grade = data.get("grade")
+
+    if not question or not grade:
+        await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
+        return
+
+    correct_answer = await generate_correct_answer(question, grade)
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await message.answer(
+        f"✅ Эталонный ответ уровня {grade}:\n\n{correct_answer}",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
 @router.message(F.text == "🏠 Главное меню")
 async def go_to_main_menu(message: Message):
     user = await get_user_from_db(message.from_user.id)
