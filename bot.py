@@ -570,12 +570,21 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, last_score=0.0)
-    await callback.message.edit_text(
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.add(
+        KeyboardButton(text="✍️ Ответить"),
+        KeyboardButton(text="❓ Уточнить информацию"),
+        KeyboardButton(text="🏠 Главное меню")
+    )
+
+    await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
         f"{question}\n\n"
-        "✍️ Напишите свой ответ сообщением."
+        "Выберите, что хотите сделать:",
+        reply_markup=keyboard
     )
-    await callback.answer()
 
 ########################
 # Функции для работы с OpenAI
