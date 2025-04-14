@@ -19,6 +19,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 
+from inactivity_middleware import InactivityMiddleware
+
 ########################
 # Загрузка переменных окружения
 ########################
@@ -49,6 +51,10 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
+
+# Подключаем middleware, оно проверит бездействие для всех входящих сообщений
+
+dp.message.middleware(InactivityMiddleware())
 
 ########################
 # Глобальные переменные
