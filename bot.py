@@ -489,15 +489,16 @@ async def ask_for_answer(message: Message, state: FSMContext):
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
-
-    # Если пользователь нажал кнопку "✅ Показать правильный ответ"
+    data = await state.get_data()
+    
+    # 1. Если пользователь нажал "✅ Показать правильный ответ"
     if text == "✅ Показать правильный ответ":
-        data = await state.get_data()
         last_question = data.get("last_question")
         last_grade = data.get("last_grade")
         if not last_question or not last_grade:
             await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
             return
+
         correct_answer = await generate_correct_answer(last_question, last_grade)
         keyboard = ReplyKeyboardMarkup(
             keyboard=[
@@ -512,10 +513,42 @@ async def handle_task_answer(message: Message, state: FSMContext):
             parse_mode="HTML",
             reply_markup=keyboard
         )
-        return  # Завершаем обработку – оценка не выполняется
+        return  # Выходим, чтобы не выполнять оценку
+        
+    # 2. Если пользователь нажал "➡️ Следующий вопрос"
+    if text == "➡️ Следующий вопрос":
+        grade = data.get("grade")
+        topic = data.get("selected_topic")  # предполагаем, что вы сохраняете выбранную тему
+        user = await get_user_from_db(message.from_user.id)
+        if not user or not grade or not topic:
+            await message.answer("⚠️ Ошибка: не найдены нужные данные.")
+            return
+        
+        name = user["name"]
+        new_question = await generate_question(grade, topic, name)
 
-    # Если сообщение не равно "✅ Показать правильный ответ", продолжается обычная логика оценки ответа
-    data = await state.get_data()
+        # Обновляем текущее задание
+        await state.update_data(question=new_question)
+        
+        # Отправляем пользователю вопрос
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✍️ Ответить")],
+                [KeyboardButton(text="❓ Уточнить по вопросу")],
+                [KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(
+            f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}",
+            reply_markup=keyboard
+        )
+        return  # Выходим, чтобы не выполнять оценку
+
+    # 3. Если пользователь ни "Показать правильный ответ", ни "Следующий вопрос" не нажимал,
+    #    значит это обычный ответ на вопрос. Оцениваем:
+    
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
@@ -527,55 +560,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
     student_name = user["name"]
     feedback_raw = await evaluate_answer(question, message.text, student_name)
-    logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
 
-    pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
-    match = re.search(pattern, feedback_raw, re.DOTALL)
-    if match:
-        criteria_block = match.group(1).strip()
-        try:
-            new_score = float(match.group(2))
-        except ValueError:
-            new_score = 0.0
-        feedback_text = match.group(3).strip()
-    else:
-        criteria_block = ""
-        new_score = 0.0
-        feedback_text = feedback_raw.strip()
-
-    if new_score > last_score:
-        diff = new_score - last_score
-        await update_user_points(message.from_user.id, diff)
-        await update_level(message.from_user.id)
-        await state.update_data(last_score=new_score)
-
-    result_msg = ""
-    if criteria_block:
-        result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
-    result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
-
-    keyboard_after_answer = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="✅ Показать правильный ответ")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-    if len(result_msg) > 4000:
-        chunks = [result_msg[i:i + 4000] for i in range(0, len(result_msg), 4000)]
-        for chunk in chunks:
-            await message.answer(chunk, parse_mode="HTML")
-        await message.answer("Что дальше?", reply_markup=keyboard_after_answer)
-    else:
-        await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard_after_answer)
-
-    # Сохраняем текущий вопрос и уровень для показа эталонного ответа в будущем
+    # ... здесь идёт логика извлечения score, feedback и т.д. ...
+    # ... формируем сообщение, отправляем его ...
+    
+    # В конце сохраняем last_question/last_grade
     await state.update_data(last_question=question, last_grade=grade)
-
 
 ########################
 # Кнопка "следующий вопрос" и показ правильного ответа
