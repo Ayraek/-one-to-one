@@ -534,66 +534,21 @@ async def process_clarification(message: Message, state: FSMContext):
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
     data = await state.get_data()
-    if not data:
-        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
-        return
-
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
     user = await get_user_from_db(message.from_user.id)
 
-    if not user:
-        await message.answer("🚫 Пользователь не найден. Повторите /start.")
+    if not grade or not question or not user:
+        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
         return
 
     student_name = user["name"]
-
-    # 🧠 Анализ — это уточняющий вопрос или просьба о доп. контексте?
-    clarification_check_prompt = (
-        f"Вот задание, которое получил кандидат:\n{question}\n\n"
-        f"Вот его сообщение:\n{message.text.strip()}\n\n"
-        f"Это уточняющий вопрос или просьба дополнить кейс? Например: 'Дай больше вводных', 'А пример есть?', 'О каком продукте речь?'\n"
-        f"Если да — ответь конкретно, в живом тоне. Дай больше контекста, пример продукта или цифры.\n"
-        f"Если это уже полноценный ответ на кейс — не пиши ничего (молчи)."
-    )
-
-    try:
-        clarification_response = await asyncio.to_thread(
-            client.chat.completions.create,
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "Ты опытный интервьюер. Когда кандидат просит контекст или пример — ты отвечаешь сразу, от первого лица, без вступлений.\n"
-                        "Никогда не повторяй текст кандидата. Не задавай встречных вопросов.\n"
-                        "Если он просит пример — приведи его. Если просит вводные — придумай логичный кейс. Будь живым, но без воды и повторов."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": clarification_check_prompt
-                }
-            ],
-            max_tokens=300,
-            temperature=0.6
-        )
-        response_text = clarification_response.choices[0].message.content.strip()
-        if response_text:
-            await message.answer(response_text)
-            return
-    except Exception as e:
-        logging.error(f"Ошибка при анализе запроса: {e}")
-        await message.answer("⚠️ Что-то пошло не так. Попробуй снова.")
-        return
-
-    # 📩 Оценка основного ответа
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
+
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
-
     if match:
         criteria_block = match.group(1).strip()
         try:
@@ -612,30 +567,28 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="➡️ Следующий вопрос")],
-        [KeyboardButton(text="🏠 Главное меню")]
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
-
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
 
+    reply_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
     if len(result_msg) > 4000:
         chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
         for i, chunk in enumerate(chunks):
-            if i == len(chunks) - 1:
-                await message.answer(chunk, parse_mode="HTML", reply_markup=keyboard)
-            else:
-                await message.answer(chunk, parse_mode="HTML")
+            await message.answer(chunk, parse_mode="HTML")
+        await message.answer("Что дальше?", reply_markup=reply_keyboard)
     else:
-        await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard)
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=reply_keyboard)
 
     await state.update_data(last_question=question, last_grade=grade)
 
