@@ -450,6 +450,36 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 # Обработка кнопки "Уточнить информацию"
 ########################
 
+@router.message(F.text == "➡️ Следующий вопрос")
+async def ask_next_question(message: Message, state: FSMContext):
+    data = await state.get_data()
+    grade = data.get("grade")
+    topic = data.get("selected_topic")
+    user = await get_user_from_db(message.from_user.id)
+    name = user["name"] if user else "кандидат"
+
+    if not grade or not topic:
+        await message.answer("⚠️ Ошибка: не найдены тема или грейд.")
+        return
+
+    question = await generate_question(grade, topic, name)
+
+    await state.update_data(question=question)
+    await message.answer(
+        f"💬 Новый вопрос для {grade} по теме «{topic}»:\n\n"
+        f"{question}\n\n"
+        "Выберите, что хотите сделать:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✍️ Ответить")],
+                [KeyboardButton(text="❓ Уточнить по вопросу")],
+                [KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+    )
+
 @router.message(F.text == "❓ Уточнить по вопросу")
 async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
@@ -581,11 +611,14 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry"),
-         InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
+    keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="➡️ Следующий вопрос")],
+        [KeyboardButton(text="🏠 Главное меню")]
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
 
     result_msg = ""
     if criteria_block:
