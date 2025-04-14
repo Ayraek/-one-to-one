@@ -421,19 +421,18 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     user = await get_user_from_db(callback.from_user.id)
 
     if not selected_grade or not user:
-        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
-        await callback.answer()
+        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь.", reply_markup=get_grades_menu())
         return
 
     question = await generate_question(selected_grade, chosen_topic, user["name"])
-    await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=selected_grade, last_score=0.0)
 
-    # 🎯 Клавиатура после вопроса
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(question=question, grade=selected_grade, topic=chosen_topic, last_score=0.0)
+
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="✍️ Ответить")],
-            [KeyboardButton(text="❓ Уточнить информацию")],
+            [KeyboardButton(text="❓ Уточнить по вопросу")],
             [KeyboardButton(text="🏠 Главное меню")]
         ],
         resize_keyboard=True,
@@ -443,10 +442,9 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
         f"{question}\n\n"
-        "Выберите, что хотите сделать:",
+        "Что вы хотите сделать?",
         reply_markup=keyboard
     )
-    await callback.answer()
 
 ########################
 # Обработка кнопки "Уточнить информацию"
