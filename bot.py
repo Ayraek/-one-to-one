@@ -397,7 +397,14 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("⚠️ Ошибка: не найден грейд. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
         await callback.answer()
         return
-    question = await generate_question(selected_grade, chosen_topic)
+
+    # 🔥 Берём имя пользователя из базы
+    user = await get_user_from_db(callback.from_user.id)
+    name = user["name"] if user and "name" in user else "кандидат"
+
+    # 🔥 Вызываем функцию с тремя аргументами
+    question = await generate_question(selected_grade, chosen_topic, name)
+
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, last_score=0.0)
     await callback.message.edit_text(
