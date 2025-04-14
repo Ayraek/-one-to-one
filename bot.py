@@ -590,9 +590,9 @@ async def clarify_after_answer(message: Message, state: FSMContext):
 @router.message(F.text == "✅ Показать правильный ответ")
 async def show_correct_answer(message: Message, state: FSMContext):
     data = await state.get_data()
-    question = data.get("question")
-    grade = data.get("grade")
-
+    # Используем данные, сохранённые после оценки (last_question/last_grade)
+    question = data.get("last_question")
+    grade = data.get("last_grade")
     if not question or not grade:
         await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
         return
