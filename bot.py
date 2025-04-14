@@ -450,12 +450,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
         try:
             clarification_response = await asyncio.to_thread(
-                client.chat.completions.create,
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role": "system", "content": "Ты ведёшь собеседование с кандидатом. Отвечай на уточняющий вопрос как в Zoom — по делу, от первого лица, живо."},
-                    {"role": "user", "content": clarification_prompt}
-                ],
+    client.chat.completions.create,
+    model="gpt-3.5-turbo",
+    messages=[
+        {"role": "system", "content": "Ты ведёшь собеседование с кандидатом. Отвечай на уточняющий вопрос как в Zoom — по делу, от первого лица. Не начинай с 'Привет' или 'Спасибо за вопрос'. Лучше сразу отвечай или начни с чего-то вроде 'Окей, понял тебя' или 'Хороший ход мысли'. Будь живым, но не шаблонным."},
+        {"role": "user", "content": clarification_prompt}
+    ],
                 max_tokens=300,
                 temperature=0.7
             )
