@@ -15,6 +15,19 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 
 ########################
+# 
+########################
+
+@router.callback_query(F.data == "start_answering")
+async def start_answering(callback: CallbackQuery):
+    await callback.message.answer(
+        "✏️ Напишите свой ответ сообщением.",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await callback.answer()
+
+
+########################
 # Загрузка переменных окружения
 ########################
 
@@ -223,6 +236,7 @@ class RegisterState(StatesGroup):
 
 class TaskState(StatesGroup):
     waiting_for_answer = State()
+    waiting_for_clarification = State()
 
 ########################
 # Основные команды и обработчики
@@ -393,30 +407,85 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     chosen_topic = callback.data.replace("topic_", "").strip()
     data = await state.get_data()
     selected_grade = data.get("selected_grade")
-    if not selected_grade:
-        await callback.message.answer("⚠️ Ошибка: не найден грейд. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not selected_grade or not user:
+        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
         await callback.answer()
         return
 
-    # 🔥 Берём имя пользователя из базы
-    user = await get_user_from_db(callback.from_user.id)
-    name = user["name"] if user and "name" in user else "кандидат"
-
-    # 🔥 Вызываем функцию с тремя аргументами
-    question = await generate_question(selected_grade, chosen_topic, name)
-
+    question = await generate_question(selected_grade, chosen_topic, user["name"])
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, last_score=0.0)
-    await callback.message.edit_text(
+
+    # 🎯 Клавиатура после вопроса
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить")],
+            [KeyboardButton(text="❓ Уточнить информацию")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
         f"{question}\n\n"
-        "✍️ Напишите свой ответ сообщением."
+        "Выберите, что хотите сделать:",
+        reply_markup=keyboard
     )
     await callback.answer()
 
 ########################
-# Обработка ответа пользователя
+# Обработка кнопки "Уточнить информацию"
 ########################
+
+@router.message(F.text == "❓ Уточнить информацию")
+async def clarify_info(message: Message, state: FSMContext):
+    await state.set_state(TaskState.waiting_for_clarification)
+    await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
+
+
+@router.message(TaskState.waiting_for_clarification)
+async def process_clarification(message: Message, state: FSMContext):
+    data = await state.get_data()
+    question = data.get("question")
+    user = await get_user_from_db(message.from_user.id)
+
+    clarification_prompt = (
+        f"Задание: {question}\n"
+        f"Вопрос от кандидата: {message.text.strip()}\n"
+        f"Ответь кратко и по делу, от первого лица. Не повторяй вопрос."
+    )
+
+    try:
+        clarification_response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты собеседуешь кандидата. Отвечай только по сути, дружелюбно, но строго. Не повторяй текст пользователя."},
+                {"role": "user", "content": clarification_prompt}
+            ],
+            max_tokens=300,
+            temperature=0.5
+        )
+        answer = clarification_response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка уточнения: {e}")
+        answer = "❌ Ошибка при уточнении. Попробуйте снова."
+
+    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
+    keyboard.add(
+        KeyboardButton(text="✍️ Ответить"),
+        KeyboardButton(text="🏠 Главное меню")
+    )
+
+    await message.answer(
+        f"📎 Уточнение:\n{answer}\n\nТеперь вы можете ответить на вопрос или вернуться в меню:",
+        reply_markup=keyboard
+    )
+    await state.set_state(TaskState.waiting_for_answer)
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
@@ -545,6 +614,15 @@ async def show_correct_answer(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+@router.callback_query(F.data == "clarify_info")
+async def clarify_info(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(TaskState.waiting_for_clarification)
+    await callback.message.answer(
+        "✏️ Напишите, что именно хотите уточнить по заданию:",
+        reply_markup=types.ReplyKeyboardRemove()
+    )
+    await callback.answer()
+
 # Обработчик кнопки "Следующий вопрос"
 @router.callback_query(F.data == "next_question")
 async def next_question_handler(callback: CallbackQuery, state: FSMContext):
@@ -559,32 +637,33 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     chosen_topic = callback.data.replace("topic_", "").strip()
     data = await state.get_data()
     selected_grade = data.get("selected_grade")
-    if not selected_grade:
-        await callback.message.answer("⚠️ Ошибка: не найден грейд. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not selected_grade or not user:
+        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
         await callback.answer()
         return
 
-    user = await get_user_from_db(callback.from_user.id)
-    name = user["name"] if user else "кандидат"
-    question = await generate_question(selected_grade, chosen_topic, name)
+    question = await generate_question(selected_grade, chosen_topic, user["name"])
 
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, last_score=0.0)
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(
-        KeyboardButton(text="✍️ Ответить"),
-        KeyboardButton(text="❓ Уточнить информацию"),
-        KeyboardButton(text="🏠 Главное меню")
-    )
+    # 👇 ВСТАВКА: Показываем вопрос + кнопки
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✍️ Ответить", callback_data="start_answering")],
+        [InlineKeyboardButton(text="❓ Уточнить информацию", callback_data="clarify_info")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
 
     await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
         f"{question}\n\n"
-        "Выберите, что хотите сделать:",
+        "Что хотите сделать?",
         reply_markup=keyboard
     )
+    await callback.answer()
+
 
 ########################
 # Функции для работы с OpenAI
