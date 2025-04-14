@@ -606,23 +606,24 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="➡️ Следующий вопрос")],
-        [KeyboardButton(text="✅ Показать правильный ответ")],
-        [KeyboardButton(text="🏠 Главное меню")]
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
+    # ✅ Клавиатура с действиями после оценки
+    keyboard_after_answer = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="✅ Показать правильный ответ")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
 
     if len(result_msg) > 4000:
-        chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
-        for i, chunk in enumerate(chunks):
+        chunks = [result_msg[i:i + 4000] for i in range(0, len(result_msg), 4000)]
+        for chunk in chunks:
             await message.answer(chunk, parse_mode="HTML")
-        await message.answer("Что дальше?", reply_markup=reply_keyboard)
+        await message.answer("Что дальше?", reply_markup=keyboard_after_answer)
     else:
-        await message.answer(result_msg, parse_mode="HTML", reply_markup=reply_keyboard)
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard_after_answer)
 
     await state.update_data(last_question=question, last_grade=grade)
 
