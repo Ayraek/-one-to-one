@@ -488,12 +488,39 @@ async def ask_for_answer(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
+    text = message.text.strip()
+
+    # Если пользователь нажал кнопку "✅ Показать правильный ответ"
+    if text == "✅ Показать правильный ответ":
+        data = await state.get_data()
+        last_question = data.get("last_question")
+        last_grade = data.get("last_grade")
+        if not last_question or not last_grade:
+            await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
+            return
+        correct_answer = await generate_correct_answer(last_question, last_grade)
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➡️ Следующий вопрос")],
+                [KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(
+            f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}",
+            parse_mode="HTML",
+            reply_markup=keyboard
+        )
+        return  # Завершаем обработку – оценка не выполняется
+
+    # Если сообщение не равно "✅ Показать правильный ответ", продолжается обычная логика оценки ответа
     data = await state.get_data()
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
     user = await get_user_from_db(message.from_user.id)
-
+    
     if not grade or not question or not user:
         await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
         return
@@ -546,8 +573,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
     else:
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard_after_answer)
 
-    # Здесь сохраняем вопрос и грейд для показа эталонного ответа:
+    # Сохраняем текущий вопрос и уровень для показа эталонного ответа в будущем
     await state.update_data(last_question=question, last_grade=grade)
+
 
 ########################
 # Кнопка "следующий вопрос" и показ правильного ответа
