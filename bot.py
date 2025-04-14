@@ -427,7 +427,12 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     question = await generate_question(selected_grade, chosen_topic, user["name"])
 
     await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=selected_grade, topic=chosen_topic, last_score=0.0)
+    await state.update_data(
+    question=question,
+    grade=selected_grade,
+    selected_topic=chosen_topic,
+    last_score=0.0
+)
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -601,14 +606,15 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    reply_keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
+    keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="➡️ Следующий вопрос")],
+        [KeyboardButton(text="✅ Показать правильный ответ")],
+        [KeyboardButton(text="🏠 Главное меню")]
+    ],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
 
     if len(result_msg) > 4000:
         chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
