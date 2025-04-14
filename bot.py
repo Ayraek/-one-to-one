@@ -20,7 +20,7 @@ dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
