@@ -485,6 +485,24 @@ async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
     await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
 
+@router.message(F.text == "🏠 Главное меню")
+async def go_to_main_menu(message: Message):
+    user = await get_user_from_db(message.from_user.id)
+
+    if user:
+        _, username, name, age, level, points = user.values()
+        text = (
+            f"<b>👤 Имя:</b> {name}\n"
+            f"<b>🎂 Возраст:</b> {age}\n"
+            f"<b>🎯 Уровень:</b> {level}\n"
+            f"<b>⭐ Баллы:</b> {points}\n\n"
+            "Вы в главном меню:"
+        )
+    else:
+        text = welcome_text
+
+    await message.answer(text, parse_mode="HTML", reply_markup=get_main_menu())
+
 @router.message(F.text == "✍️ Ответить")
 async def ask_for_answer(message: Message, state: FSMContext):
     await message.answer("✏️ Напишите свой ответ сообщением.")
