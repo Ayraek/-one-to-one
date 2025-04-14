@@ -424,18 +424,54 @@ async def handle_task_answer(message: Message, state: FSMContext):
     if not data:
         await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
         return
+
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
     user = await get_user_from_db(message.from_user.id)
+
     if not user:
         await message.answer("🚫 Пользователь не найден. Повторите /start.")
         return
+
     student_name = user["name"]
+
+    # 🔍 Уточняющий вопрос?
+    if message.text.strip().endswith("?"):
+        clarification_prompt = (
+            f"Основной вопрос кандидату:\n{question}\n\n"
+            f"Кандидат задал уточняющий вопрос:\n{message.text.strip()}\n\n"
+            f"Проанализируй: относится ли этот вопрос к теме основного задания?\n"
+            f"Если да — ответь вдумчиво, коротко, по сути.\n"
+            f"Если нет — скажи, что вопрос не относится к заданию и попроси ответить на задание.\n"
+            f"Тон: профессиональный, но дружелюбный. Не используй Markdown и *. Отвечай по-русски."
+        )
+
+        try:
+            clarification_response = await asyncio.to_thread(
+                client.chat.completions.create,
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "Ты помощник-интервьюер. Анализируешь, по теме ли вопрос, и отвечаешь или отказываешь в зависимости от сути."},
+                    {"role": "user", "content": clarification_prompt}
+                ],
+                max_tokens=300,
+                temperature=0.5
+            )
+            response_text = clarification_response.choices[0].message.content.strip()
+            await message.answer(response_text)
+            return
+        except Exception as e:
+            logging.error(f"Ошибка при анализе уточняющего вопроса: {e}")
+            await message.answer("🤖 Ошибка при обработке вопроса. Попробуй ещё раз.")
+            return
+
+    # 📩 Оценка ответа
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"RAW FEEDBACK:\n{feedback_raw}")
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
+
     if match:
         criteria_block = match.group(1).strip()
         try:
@@ -447,21 +483,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
         criteria_block = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
+
     if new_score > last_score:
         diff = new_score - last_score
         await update_user_points(message.from_user.id, diff)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
+
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔁 Попробовать снова", callback_data="retry"),
          InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="show_answer")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
+
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
+
     if len(result_msg) > 4000:
         chunks = [result_msg[i:i+4000] for i in range(0, len(result_msg), 4000)]
         for i, chunk in enumerate(chunks):
@@ -471,6 +511,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
                 await message.answer(chunk, parse_mode="HTML")
     else:
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard)
+
     await state.update_data(last_question=question, last_grade=grade)
 
 ########################
