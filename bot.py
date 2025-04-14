@@ -20,7 +20,7 @@ dp = Dispatcher()
 router = Router()
 dp.include_router(router)
 
-from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
@@ -457,7 +457,10 @@ async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
     await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
 
-
+@router.message(F.text == "✍️ Ответить")
+async def start_answering(message: Message):
+    await message.answer("✏️ Введите ваш ответ сообщением.", reply_markup=ReplyKeyboardRemove())
+    
 @router.message(TaskState.waiting_for_clarification)
 async def process_clarification(message: Message, state: FSMContext):
     data = await state.get_data()
