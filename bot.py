@@ -497,18 +497,27 @@ async def next_question_handler(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # Обработчик кнопки "Попробовать снова" (retry)
-@router.callback_query(F.data == "retry")
-async def retry_question(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data.startswith("topic_"))
+async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
+    chosen_topic = callback.data.replace("topic_", "").strip()
     data = await state.get_data()
-    question = data.get("last_question")
-    grade = data.get("last_grade")
-    if not question or not grade:
-        await callback.message.answer("⚠️ Ошибка: нет сохранённого задания.", reply_markup=get_main_menu())
+    selected_grade = data.get("selected_grade")
+    if not selected_grade:
+        await callback.message.answer("⚠️ Ошибка: не найден грейд. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
         await callback.answer()
         return
+
+    user = await get_user_from_db(callback.from_user.id)
+    name = user["name"] if user else "кандидат"
+    question = await generate_question(selected_grade, chosen_topic, name)
+
     await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=question, grade=grade, last_score=data.get("last_score", 0.0))
-    await callback.message.answer(f"✍️ Повторите, пожалуйста, ответ на вопрос уровня {grade}:\n\n{question}")
+    await state.update_data(question=question, grade=selected_grade, last_score=0.0)
+    await callback.message.edit_text(
+        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n"
+        f"{question}\n\n"
+        "✍️ Напишите свой ответ сообщением."
+    )
     await callback.answer()
 
 ########################
