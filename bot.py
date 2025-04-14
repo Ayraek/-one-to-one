@@ -450,10 +450,10 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 # Обработка кнопки "Уточнить информацию"
 ########################
 
-@router.message(F.text == "❓ Уточнить информацию")
+@router.message(F.text == "❓ Уточнить по вопросу")
 async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
-    await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
+    await message.answer("✏️ Напишите, что хотите уточнить по вопросу.", reply_markup=ReplyKeyboardRemove())
 
 @router.message(F.text == "✍️ Ответить")
 async def start_answering(message: Message):
@@ -465,38 +465,39 @@ async def process_clarification(message: Message, state: FSMContext):
     question = data.get("question")
     user = await get_user_from_db(message.from_user.id)
 
-    clarification_prompt = (
+    prompt = (
         f"Задание: {question}\n"
         f"Вопрос от кандидата: {message.text.strip()}\n"
-        f"Ответь кратко и по делу, от первого лица. Не повторяй вопрос."
+        f"Ответь дружелюбно, по делу, без повторов и приветствий."
     )
 
     try:
-        clarification_response = await asyncio.to_thread(
+        response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты собеседуешь кандидата. Отвечай только по сути, дружелюбно, но строго. Не повторяй текст пользователя."},
-                {"role": "user", "content": clarification_prompt}
+                {"role": "system", "content": "Ты собеседуешь кандидата. Отвечай по сути, не повторяй вопрос, не начинай с приветствия."},
+                {"role": "user", "content": prompt}
             ],
             max_tokens=300,
             temperature=0.5
         )
-        answer = clarification_response.choices[0].message.content.strip()
+        answer = response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Ошибка уточнения: {e}")
-        answer = "❌ Ошибка при уточнении. Попробуйте снова."
+        answer = "❌ Что-то пошло не так, попробуй ещё раз."
 
-    keyboard = ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-    keyboard.add(
-        KeyboardButton(text="✍️ Ответить"),
-        KeyboardButton(text="🏠 Главное меню")
+    # Показываем клавиатуру для ответа или выхода
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
     )
 
-    await message.answer(
-        f"📎 Уточнение:\n{answer}\n\nТеперь вы можете ответить на вопрос или вернуться в меню:",
-        reply_markup=keyboard
-    )
+    await message.answer(f"📎 Уточнение:\n{answer}\n\nТеперь выбери, что хочешь сделать:", reply_markup=keyboard)
     await state.set_state(TaskState.waiting_for_answer)
 
 @router.message(TaskState.waiting_for_answer)
