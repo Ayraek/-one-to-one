@@ -8,7 +8,13 @@ from dotenv import load_dotenv
 
 from openai import OpenAI
 
-from aiogram import Bot, Dispatcher, Router, types, F
+from aiogram import Bot, Dispatcher, Router, F
+
+bot = Bot(token=API_TOKEN)
+dp = Dispatcher()
+router = Router()
+dp.include_router(router)
+
 from aiogram.types import Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
