@@ -486,8 +486,9 @@ async def clarify_info(message: Message, state: FSMContext):
     await message.answer("✏️ Напишите, что хотите уточнить по вопросу.", reply_markup=ReplyKeyboardRemove())
 
 @router.message(F.text == "✍️ Ответить")
-async def start_answering(message: Message):
-    await message.answer("✏️ Напишите свой ответ сообщением.", reply_markup=ReplyKeyboardRemove())
+async def ask_for_answer(message: Message, state: FSMContext):
+    await message.answer("✏️ Напишите свой ответ сообщением.")
+    await state.set_state(TaskState.waiting_for_answer)
     
 @router.message(TaskState.waiting_for_clarification)
 async def process_clarification(message: Message, state: FSMContext):
