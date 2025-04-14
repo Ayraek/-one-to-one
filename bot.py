@@ -54,7 +54,8 @@ dp.include_router(router)
 
 # Подключаем middleware, оно проверит бездействие для всех входящих сообщений
 
-dp.message.middleware(InactivityMiddleware())
+dp.message.middleware(InactivityMiddleware(timeout_seconds=900))
+dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=900))
 
 ########################
 # Глобальные переменные
