@@ -546,6 +546,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
     else:
         await message.answer(result_msg, parse_mode="HTML", reply_markup=keyboard_after_answer)
 
+    # Здесь сохраняем вопрос и грейд для показа эталонного ответа:
     await state.update_data(last_question=question, last_grade=grade)
 
 ########################
@@ -596,7 +597,7 @@ async def show_correct_answer(message: Message, state: FSMContext):
     if not last_question or not last_grade:
         await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
         return
-    
+
     correct_answer = await generate_correct_answer(last_question, last_grade)
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -606,7 +607,6 @@ async def show_correct_answer(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    
     await message.answer(
         f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}",
         parse_mode="HTML",
@@ -703,11 +703,10 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
 
 async def generate_correct_answer(question: str, grade: str) -> str:
     prompt = (
-        f"Ты опытный преподаватель продакт-менеджмента. "
-        f"Дай подробный правильный ответ для уровня {grade} на следующий вопрос:\n\n"
+        f"Приведи полностью развернутый правильный ответ для уровня {grade} на следующий вопрос:\n\n"
         f"{question}\n\n"
-        "Пожалуйста, приведи только эталонное решение без оценок, комментариев, приветствий или повторов. "
-        "Верни только ответ, структурированный и исчерпывающий ключевые моменты."
+        "Отвечай строго по делу, без оценочных комментариев, приветствий или лишних пояснений. "
+        "Дай только эталонное решение."
     )
     try:
         response = await asyncio.to_thread(
@@ -716,18 +715,20 @@ async def generate_correct_answer(question: str, grade: str) -> str:
             messages=[
                 {
                     "role": "system",
-                    "content": "Ты генерируешь подробные правильные ответы для студентов. Не добавляй оценок, приветствий или лишних пояснений."
+                    "content": (
+                        "Ты опытный преподаватель продакт-менеджмента. Твой ответ должен содержать только правильное, "
+                        "структурированное и подробное решение, без оценок, приветствий и дополнительных комментариев."
+                    )
                 },
                 {"role": "user", "content": prompt}
             ],
-            max_tokens=1000,  # при необходимости можно увеличить количество токенов
-            temperature=0.7
+            max_tokens=1000,
+            temperature=0.3
         )
         return response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Ошибка генерации эталонного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
-
 
 ########################
 # Запуск бота
