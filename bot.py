@@ -483,7 +483,7 @@ async def ask_next_question(message: Message, state: FSMContext):
 @router.message(F.text == "❓ Уточнить по вопросу")
 async def clarify_info(message: Message, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
-    await message.answer("✏️ Напишите, что хотите уточнить по вопросу.", reply_markup=ReplyKeyboardRemove())
+    await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
 
 @router.message(F.text == "✍️ Ответить")
 async def ask_for_answer(message: Message, state: FSMContext):
@@ -495,31 +495,41 @@ async def process_clarification(message: Message, state: FSMContext):
     data = await state.get_data()
     question = data.get("question")
     user = await get_user_from_db(message.from_user.id)
+    name = user["name"] if user else "кандидат"
 
-    prompt = (
-        f"Задание: {question}\n"
-        f"Вопрос от кандидата: {message.text.strip()}\n"
-        f"Ответь дружелюбно, по делу, без повторов и приветствий."
+    if not question:
+        await message.answer("⚠️ Не найден исходный вопрос.")
+        return
+
+    clarification_prompt = (
+        f"Вопрос: {question}\n"
+        f"Уточнение от кандидата {name}:\n{message.text.strip()}\n\n"
+        f"Ответь дружелюбно и по существу. Без повторов и вступлений."
     )
 
     try:
-        response = await asyncio.to_thread(
+        clarification_response = await asyncio.to_thread(
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты собеседуешь кандидата. Отвечай по сути, не повторяй вопрос, не начинай с приветствия."},
-                {"role": "user", "content": prompt}
+                {
+                    "role": "system",
+                    "content": "Ты проводишь интервью. Отвечай строго по сути, вежливо и живо. Не повторяй вопрос, не используй шаблоны."
+                },
+                {
+                    "role": "user",
+                    "content": clarification_prompt
+                }
             ],
             max_tokens=300,
             temperature=0.5
         )
-        answer = response.choices[0].message.content.strip()
+        reply = clarification_response.choices[0].message.content.strip()
     except Exception as e:
-        logging.error(f"Ошибка уточнения: {e}")
-        answer = "❌ Что-то пошло не так, попробуй ещё раз."
+        logging.error(f"Ошибка при уточнении: {e}")
+        reply = "❌ Не удалось получить ответ. Попробуйте снова."
 
-    # Показываем клавиатуру для ответа или выхода
-    keyboard = ReplyKeyboardMarkup(
+    reply_keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="✍️ Ответить")],
             [KeyboardButton(text="🏠 Главное меню")]
@@ -528,7 +538,7 @@ async def process_clarification(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await message.answer(f"📎 Уточнение:\n{answer}\n\nТеперь выбери, что хочешь сделать:", reply_markup=keyboard)
+    await message.answer(f"📎 Уточнение:\n{reply}\n\nЧто делаем дальше?", reply_markup=reply_keyboard)
     await state.set_state(TaskState.waiting_for_answer)
 
 @router.message(TaskState.waiting_for_answer)
