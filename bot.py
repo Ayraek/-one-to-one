@@ -21,6 +21,15 @@ from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
 
 ########################
+# Загрузка переменных окружения
+########################
+
+API_TOKEN = os.getenv("API_TOKEN")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+ADMIN_IDS = os.getenv("ADMIN_IDS", "")
+admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
+
+########################
 # Инициализация бота/диспетчера
 ########################
 
@@ -31,15 +40,6 @@ router = Router()
 dp.include_router(router)
 dp.message.middleware(InactivityMiddleware(timeout_seconds=900))
 dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=900))
-
-########################
-# Загрузка переменных окружения
-########################
-
-API_TOKEN = os.getenv("API_TOKEN")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-ADMIN_IDS = os.getenv("ADMIN_IDS", "")
-admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
 ########################
 # Настройка OpenAI клиента
