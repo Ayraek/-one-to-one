@@ -682,6 +682,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
     text = message.text.strip() if message.text else ""
+
+    # --- Главное меню ---
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню' в голосовом режиме")
         user = await get_user_from_db(message.from_user.id)
@@ -695,44 +697,42 @@ async def process_voice_message(message: Message, state: FSMContext):
             )
         else:
             profile_text = "Пользователь не найден. Вы в главном меню."
-
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
         await state.clear()
         return
-    
+
+    # --- Следующий вопрос ---
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос' в голосовом режиме")
         data = await state.get_data()
         grade = data.get("grade")
         topic = data.get("selected_topic")
-    if not grade or not topic:
-        await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
+        if not grade or not topic:
+            await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
+            return
+        user = await get_user_from_db(message.from_user.id)
+        if not user:
+            await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
+            return
+        name = user["name"]
+        new_question = await generate_question(grade, topic, name)
+        await state.set_state(TaskState.waiting_for_answer)
+        await state.update_data(question=new_question, last_score=0)
+
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+                [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    user = await get_user_from_db(message.from_user.id)
-    if not user:
-        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
-        return
-
-    name = user["name"]
-    new_question = await generate_question(grade, topic, name)
-    await state.set_state(TaskState.waiting_for_answer)
-    await state.update_data(question=new_question, last_score=0)
-
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
-            [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-    await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
-    return
-
+    # --- Показать правильный ответ ---
     if text == "✅ Показать правильный ответ":
-        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в режиме голосового ответа")
+        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в голосовом режиме")
         data = await state.get_data()
         last_question = data.get("last_question")
         last_grade = data.get("last_grade")
@@ -757,7 +757,7 @@ async def process_voice_message(message: Message, state: FSMContext):
         await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
-    # --- Если пользователь не отправил голос --- 
+    # --- Если пользователь не отправил голос ---
     if not message.voice:
         await message.answer("⚠️ Пожалуйста, отправьте именно голосовое сообщение.")
         return
@@ -801,6 +801,7 @@ async def process_voice_message(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    import re
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
