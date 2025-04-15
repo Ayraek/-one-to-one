@@ -681,10 +681,40 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
+    # --- Обработка кнопки "✅ Показать правильный ответ" ---
+    text = message.text.strip() if message.text else ""
+    if text == "✅ Показать правильный ответ":
+        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в режиме голосового ответа")
+        data = await state.get_data()
+        last_question = data.get("last_question")
+        last_grade = data.get("last_grade")
+
+        if not last_question or not last_grade:
+            await message.answer(
+                "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ.",
+                reply_markup=get_main_menu()
+            )
+            await state.clear()
+            return
+
+        correct_answer = await generate_correct_answer(last_question, last_grade)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➡️ Следующий вопрос")],
+                [KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
+        return
+
+    # --- Если пользователь не отправил голос --- 
     if not message.voice:
         await message.answer("⚠️ Пожалуйста, отправьте именно голосовое сообщение.")
         return
 
+    # --- Обработка голосового файла ---
     voice = message.voice
     file = await bot.get_file(voice.file_id)
     file_path = file.file_path
@@ -701,14 +731,17 @@ async def process_voice_message(message: Message, state: FSMContext):
     os.remove(save_path)
     await message.answer(f"📝 Расшифровка: «{text}»\nОцениваю...")
 
+    # --- Оценка ответа ---
     data = await state.get_data()
     question = data.get("question")
     grade = data.get("grade")
     last_score = data.get("last_score", 0.0)
     user = await get_user_from_db(message.from_user.id)
+
     if not user or not grade or not question:
         await message.answer("⚠️ Не найдены данные для оценки.")
         return
+
     feedback_raw = await evaluate_answer(question, text, user["name"])
     logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
 
@@ -739,6 +772,7 @@ async def process_voice_message(message: Message, state: FSMContext):
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
 
+    # --- Формирование результата ---
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
@@ -756,7 +790,6 @@ async def process_voice_message(message: Message, state: FSMContext):
     )
 
     await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
-    await state.clear()
     await state.update_data(last_question=question, last_grade=grade)
 
 # --------------------------
