@@ -535,6 +535,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         else:
             profile_text = "Пользователь не найден. Вы в главном меню."
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
+        await state.clear()
         return
 
     # 3. "✅ Показать правильный ответ"
@@ -748,6 +749,7 @@ async def process_voice_message(message: Message, state: FSMContext):
     )
 
     await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
+    await state.clear()
     await state.update_data(last_question=question, last_grade=grade)
 
 # --------------------------
