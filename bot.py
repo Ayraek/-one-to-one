@@ -511,13 +511,14 @@ async def handle_task_answer(message: Message, state: FSMContext):
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
-    # Обработка сервисных команд:
+    # Если нажата кнопка "❓ Уточнить по вопросу"
     if text == "❓ Уточнить по вопросу":
         logging.info("[DEBUG] Пользователь нажал '❓ Уточнить по вопросу'")
         await state.set_state(TaskState.waiting_for_clarification)
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
 
+    # Если нажата кнопка "🏠 Главное меню"
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
@@ -538,6 +539,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
         return
 
+    # Если нажата кнопка "✅ Показать правильный ответ"
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
         last_question = data.get("last_question")
@@ -557,6 +559,13 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
+    # Новая проверка: Если нажата кнопка "✍️ Ответить"
+    if text == "✍️ Ответить":
+        logging.info("[DEBUG] Пользователь нажал '✍️ Ответить' для перехода к написанию ответа")
+        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
+        return
+
+    # Если нажата кнопка "➡️ Следующий вопрос"
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
         grade = data.get("grade")
@@ -581,7 +590,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         return
 
     # Если ни одна из сервисных кнопок не была нажата,
-    # обрабатываем сообщение как обычный ответ.
+    # обрабатываем сообщение как обычный ответ и оцениваем его.
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
