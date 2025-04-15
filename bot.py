@@ -946,11 +946,10 @@ async def transcribe_audio(file_path: str) -> str:
         response = await asyncio.to_thread(
             client.audio.transcriptions.create,
             model="whisper-1",
-            file=audio_file
+            file=audio_file,
             language="ru"
         )
     return response.text
-
 # --------------------------
 # Запуск бота
 # --------------------------
