@@ -584,7 +584,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
             resize_keyboard=True,
             one_time_keyboard=True
         )
-        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
+        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        await message.answer("👇 Что делаем дальше?", reply_markup=kb)
         return
 
     # ➡️ Следующий вопрос
@@ -676,8 +677,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
+
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
@@ -696,8 +699,9 @@ async def process_voice_message(message: Message, state: FSMContext):
                 "Вы в главном меню:"
             )
         else:
-            profile_text = "Пользователь не найден. Вы в главном меню."
-        await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
+             profile_text = "Пользователь не найден. Вы в главном меню."
+        await message.answer(profile_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+        await message.answer("👇 Главное меню", reply_markup=get_main_menu())
         await state.clear()
         return
 
@@ -838,7 +842,8 @@ async def process_voice_message(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    await message.answer("Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
 
 # --------------------------
