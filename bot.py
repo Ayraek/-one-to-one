@@ -410,18 +410,25 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     selected_grade = data.get("selected_grade")
     user = await get_user_from_db(callback.from_user.id)
+
     if not selected_grade or not user:
         await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
         await callback.answer()
         return
+
     question = await generate_question(selected_grade, chosen_topic, user["name"])
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✍️ Ответить", callback_data="start_answering")],
-        [InlineKeyboardButton(text="❓ Уточнить информацию", callback_data="clarify_info")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
+
+    # Используем новую клавиатуру
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="Ответить текстом"), KeyboardButton(text="Ответить голосом")],
+            [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
     await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\nЧто хотите сделать?",
         reply_markup=keyboard
@@ -490,23 +497,17 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
-    # Получаем текст сообщения и удаляем лишние пробелы
     text = message.text.strip()
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
-    # --- Обработка сервисных команд ---
-    # Если нажата кнопка "❓ Уточнить по вопросу"
-    if text == "❓ Уточнить по вопросу":
-        logging.info("[DEBUG] Пользователь нажал '❓ Уточнить по вопросу'")
+    # Обработка сервисных команд:
+    if text == "❓ Уточнить":
+        logging.info("[DEBUG] Пользователь нажал '❓ Уточнить'")
         await state.set_state(TaskState.waiting_for_clarification)
-        await message.answer(
-            "✏️ Напишите, что именно хотите уточнить по заданию:",
-            reply_markup=types.ReplyKeyboardRemove()
-        )
+        await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # Если нажата кнопка "🏠 Главное меню"
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
@@ -523,7 +524,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
         return
 
-    # Если нажата кнопка "✅ Показать правильный ответ"
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
         last_question = data.get("last_question")
@@ -540,14 +540,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
             resize_keyboard=True,
             one_time_keyboard=True
         )
-        await message.answer(
-            f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}",
-            parse_mode="HTML",
-            reply_markup=kb
-        )
+        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
-    # Если нажата кнопка "➡️ Следующий вопрос"
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
         grade = data.get("grade")
@@ -562,30 +557,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
         name = user["name"]
         new_question = await generate_question(grade, topic, name)
         logging.info(f"[DEBUG] Сгенерирован новый вопрос: {new_question}")
-        await state.update_data(question=new_question, last_score=0)  # Сброс баллов для нового вопроса
+        await state.update_data(question=new_question, last_score=0)
         kb = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="✍️ Ответить")],
-                [KeyboardButton(text="❓ Уточнить по вопросу")],
-                [KeyboardButton(text="🏠 Главное меню")]
+                [KeyboardButton(text="Ответить текстом"), KeyboardButton(text="Ответить голосом")],
+                [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
             ],
             resize_keyboard=True,
             one_time_keyboard=True
         )
-        await message.answer(
-            f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}",
-            reply_markup=kb
-        )
+        await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    # --- Новая проверка для кнопки "✍️ Ответить" ---
-    if text == "✍️ Ответить":
-        logging.info("[DEBUG] Пользователь нажал '✍️ Ответить' для ввода ответа")
-        # Выводим сообщение с просьбой ввести ответ вручную (не оцениваем текущее сообщение)
+    # Новая проверка для кнопки "Ответить текстом"
+    if text == "Ответить текстом":
+        logging.info("[DEBUG] Пользователь выбрал 'Ответить текстом'")
         await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # --- Обработка обычного ответа (не сервисной команды) ---
+    # Если сообщение не является сервисной командой, обрабатываем как обычный ответ.
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
@@ -617,6 +607,89 @@ async def handle_task_answer(message: Message, state: FSMContext):
         feedback_text = feedback_raw.strip()
     
     logging.info(f"[DEBUG] new_score: {new_score}, last_score: {last_score}")
+    if new_score > last_score:
+        diff = new_score - last_score
+        logging.info(f"[DEBUG] Новый балл diff = {diff}")
+        await update_user_points(message.from_user.id, diff)
+        await update_level(message.from_user.id)
+        await state.update_data(last_score=new_score)
+    
+    result_msg = ""
+    if criteria_block:
+        result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
+    result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
+    
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="✅ Показать правильный ответ")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
+    await state.update_data(last_question=question, last_grade=grade)
+
+@router.message(content_types=types.ContentType.VOICE, state=TaskState.waiting_for_answer)
+async def handle_voice_answer(message: types.Message, state: FSMContext):
+    # Получаем информацию о голосовом сообщении
+    voice = message.voice
+    file_info = await bot.get_file(voice.file_id)
+    file_path = file_info.file_path
+
+    # Скачиваем аудиофайл с Telegram
+    file_data = await bot.download_file(file_path)
+    local_filename = "voice_message.ogg"
+    with open(local_filename, "wb") as f:
+        f.write(file_data.read())
+
+    # Транскрибируем аудиофайл в текст через OpenAI Whisper
+    try:
+        transcribed_text = await transcribe_audio(local_filename)
+        logging.info(f"[DEBUG] Transcribed voice answer: {transcribed_text}")
+    except Exception as e:
+        logging.error(f"Ошибка транскрипции: {e}")
+        await message.answer("❌ Не удалось обработать голосовое сообщение. Попробуйте текстовым способом.")
+        return
+
+    # Удаляем локальный файл, так как он больше не нужен
+    os.remove(local_filename)
+
+    # Используем транскрибированный текст как ответ
+    data = await state.get_data()
+    grade = data.get("grade")
+    question = data.get("question")
+    last_score = data.get("last_score", 0.0)
+    if not grade or not question:
+        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
+        return
+    user = await get_user_from_db(message.from_user.id)
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.")
+        return
+    student_name = user["name"]
+
+    # Оцениваем ответ с транскрибированным текстом
+    feedback_raw = await evaluate_answer(question, transcribed_text, student_name)
+    logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
+    
+    pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
+    match = re.search(pattern, feedback_raw, re.DOTALL)
+    if match:
+        criteria_block = match.group(1).strip()
+        try:
+            new_score = float(match.group(2))
+        except ValueError:
+            new_score = 0.0
+        feedback_text = match.group(3).strip()
+    else:
+        criteria_block = ""
+        new_score = 0.0
+        feedback_text = feedback_raw.strip()
+    
     if new_score > last_score:
         diff = new_score - last_score
         logging.info(f"[DEBUG] Новый балл diff = {diff}")
@@ -729,7 +802,10 @@ async def generate_correct_answer(question: str, grade: str) -> str:
             client.chat.completions.create,
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": "Ты опытный преподаватель продакт-менеджмента. Твой ответ должен содержать только правильное, структурированное и подробное решение, без оценок, приветствий и лишних комментариев."},
+                {
+                    "role": "system",
+                    "content": "Ты опытный преподаватель продакт-менеджмента. Твой ответ должен содержать только правильное, структурированное и подробное решение, без оценок, приветствий и лишних комментариев."
+                },
                 {"role": "user", "content": prompt}
             ],
             max_tokens=1000,
@@ -739,6 +815,16 @@ async def generate_correct_answer(question: str, grade: str) -> str:
     except Exception as e:
         logging.error(f"Ошибка генерации эталонного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
+
+
+async def transcribe_audio(file_path: str) -> str:
+    with open(file_path, "rb") as audio_file:
+        transcription = await asyncio.to_thread(
+            client.Audio.transcribe,
+            model="whisper-1",
+            file=audio_file
+        )
+    return transcription["text"]
 
 # --------------------------
 # Запуск бота
