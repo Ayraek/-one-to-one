@@ -18,8 +18,19 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
-
 from inactivity_middleware import InactivityMiddleware
+
+########################
+# Инициализация бота/диспетчера
+########################
+
+bot = Bot(token=API_TOKEN)
+storage = MemoryStorage()
+dp = Dispatcher(storage=storage)
+router = Router()
+dp.include_router(router)
+dp.message.middleware(InactivityMiddleware(timeout_seconds=900))
+dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=900))
 
 ########################
 # Загрузка переменных окружения
@@ -41,21 +52,6 @@ client = OpenAI(api_key=OPENAI_API_KEY)
 ########################
 
 logging.basicConfig(level=logging.INFO)
-
-########################
-# Инициализация бота/диспетчера
-########################
-
-bot = Bot(token=API_TOKEN)
-storage = MemoryStorage()
-dp = Dispatcher(storage=storage)
-router = Router()
-dp.include_router(router)
-
-# Подключаем middleware, оно проверит бездействие для всех входящих сообщений
-
-dp.message.middleware(InactivityMiddleware(timeout_seconds=900))
-dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=900))
 
 ########################
 # Глобальные переменные
@@ -248,17 +244,79 @@ async def start_answering(callback: CallbackQuery):
 
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
+    # При запуске /start очищаем предыдущее состояние,
+    # чтобы диалог начинался заново.
+    await state.clear()
+    # Обнуляем список id сообщений бота
+    await state.update_data(bot_messages=[])
+    
+    # Проверяем, зарегистрирован ли пользователь
     user = await get_user_from_db(message.from_user.id)
+    
     if user is None:
+        # Если пользователь не зарегистрирован – сначала показываем логотип с фото.
+        logo_msg = await message.answer_photo(
+            photo="https://i.imgur.com/zIPzQKF.jpeg",
+            caption="Добро пожаловать в One to One IT Academy!"
+        )
+        # Сохраняем id сообщения логотипа в состоянии (список bot_messages)
+        data = await state.get_data()
+        bot_messages = data.get("bot_messages", [])
+        bot_messages.append(logo_msg.message_id)
+        await state.update_data(bot_messages=bot_messages)
+        
+        # Затем отправляем сообщение с кнопкой "Начать обучение"
+        start_keyboard = types.ReplyKeyboardMarkup(
+            keyboard=[[types.KeyboardButton(text="Начать обучение")]],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        start_msg = await message.answer("Нажмите «Начать обучение», чтобы начать.", reply_markup=start_keyboard)
+        # Сохраняем id этого сообщения
+        data = await state.get_data()
+        bot_messages = data.get("bot_messages", [])
+        bot_messages.append(start_msg.message_id)
+        await state.update_data(bot_messages=bot_messages)
+        
+    else:
+        # Если пользователь зарегистрирован – показываем приветственное сообщение и главное меню
+        username, name, age, level, points = (
+            user["username"],
+            user["name"],
+            user["age"],
+            user["level"],
+            user["points"]
+        )
+        # Округляем баллы до 2-х знаков после запятой (если нужно)
+        points_str = f"{points:.2f}"
+        welcome = f"👋 Привет, {name}!\n{welcome_text}\n<b>⭐ Баллы:</b> {points_str}"
+        main_menu_msg = await message.answer(welcome, reply_markup=get_main_menu(), parse_mode="HTML")
+        # Сохраняем id сообщения
+        data = await state.get_data()
+        bot_messages = data.get("bot_messages", [])
+        bot_messages.append(main_menu_msg.message_id)
+        await state.update_data(bot_messages=bot_messages)
+
+@router.message(lambda msg: msg.text == "Начать обучение")
+async def start_training(message: Message, state: FSMContext):
+    # Очищаем состояние, чтобы начать диалог с чистого листа
+    await state.clear()
+    # Инициализируем список идентификаторов сообщений бота (если используете middleware для удаления сообщений)
+    await state.update_data(bot_messages=[])
+
+    # Далее проверяем, зарегистрирован ли пользователь
+    user = await get_user_from_db(message.from_user.id)
+    if user:
+        # Если пользователь зарегистрирован – выводим главное меню
+        await message.answer("Добро пожаловать! Выберите, что хотите сделать.", reply_markup=get_main_menu())
+    else:
+        # Если пользователь не зарегистрирован – отправляем логотип и начинаем регистрацию
         await message.answer_photo(
             photo="https://i.imgur.com/zIPzQKF.jpeg",
             caption="Добро пожаловать в One to One IT Academy!"
         )
         await message.answer("👋 Как тебя зовут?")
         await state.set_state(RegisterState.name)
-    else:
-        username, name, age, level, points = user["username"], user["name"], user["age"], user["level"], user["points"]
-        await message.answer(f"👋 Привет, {name}!\n{welcome_text}", reply_markup=get_main_menu())
 
 @router.message(RegisterState.name)
 async def process_name(message: Message, state: FSMContext):
