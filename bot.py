@@ -693,9 +693,17 @@ async def process_voice_message(message: Message, state: FSMContext):
     if not user or not grade or not question:
         await message.answer("⚠️ Не найдены данные для оценки.")
         return
-
     feedback_raw = await evaluate_answer(question, text, user["name"])
-    import re
+    logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
+
+    if not feedback_raw or "Ошибка" in feedback_raw:
+        await message.answer(
+            "❌ Произошла ошибка при оценке голосового ответа. Попробуйте снова или воспользуйтесь текстом.",
+            reply_markup=get_main_menu()
+        )
+        await state.clear()
+        return
+
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
@@ -730,8 +738,10 @@ async def process_voice_message(message: Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
+
     await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
+
 # --------------------------
 # Дополнительный callback для "next_question"
 # --------------------------
