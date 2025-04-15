@@ -681,8 +681,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
-    # --- Обработка кнопки "✅ Показать правильный ответ" ---
     text = message.text.strip() if message.text else ""
+    if text == "🏠 Главное меню":
+        logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню' в голосовом режиме")
+        user = await get_user_from_db(message.from_user.id)
+        if user:
+            profile_text = (
+                f"<b>👤 Имя:</b> {user['name']}\n"
+                f"<b>🎂 Возраст:</b> {user['age']}\n"
+                f"<b>🎯 Уровень:</b> {user['level']}\n"
+                f"<b>⭐ Баллы:</b> {user['points']}\n\n"
+                "Вы в главном меню:"
+            )
+        else:
+            profile_text = "Пользователь не найден. Вы в главном меню."
+
+        await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
+        await state.clear()
+        return
+    
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в режиме голосового ответа")
         data = await state.get_data()
