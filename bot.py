@@ -970,6 +970,34 @@ async def transcribe_audio(file_path: str) -> str:
             language="ru"
         )
     return response.text
+
+# --------------------------
+# Автостарт при любой активности вне FSM
+# --------------------------
+
+@router.message()
+async def catch_all(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    
+    if current_state is None:
+        user = await get_user_from_db(message.from_user.id)
+
+        if user:
+            await state.clear()
+
+            await message.answer("👋 Кажется, вы вернулись спустя время!", reply_markup=ReplyKeyboardRemove())
+            await message.answer(
+                f"🎓 Уровень: {user['level']} | ⭐ Баллы: {user['points']}\n\n"
+                "Готов продолжить?",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="🚀 Готов, погнали!")]],
+                    resize_keyboard=True,
+                    one_time_keyboard=True
+                )
+            )
+        else:
+            await message.answer("👋 Привет! Давай зарегистрируемся. Как тебя зовут?")
+            await state.set_state(RegisterState.name)
 # --------------------------
 # Запуск бота
 # --------------------------
