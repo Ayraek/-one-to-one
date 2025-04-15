@@ -519,6 +519,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
+    if text == "✍️ Ответить":
+        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
+        return
     # ✍️ Ответить текстом
     if text == "✍️ Ответить текстом":
         logging.info("[DEBUG] Пользователь выбрал '✍️ Ответить текстом'")
