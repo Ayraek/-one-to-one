@@ -947,6 +947,7 @@ async def transcribe_audio(file_path: str) -> str:
             client.audio.transcriptions.create,
             model="whisper-1",
             file=audio_file
+            language="ru"
         )
     return response.text
 
