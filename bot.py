@@ -239,11 +239,9 @@ async def start_answering(callback: CallbackQuery):
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
     await state.clear()
+    await message.answer("🔄 Перезапуск...", reply_markup=ReplyKeyboardRemove())
 
     user = await get_user_from_db(message.from_user.id)
-
-    # Удалим старые клавиатуры
-    await message.answer("🔄 Перезапуск бота...", reply_markup=ReplyKeyboardRemove())
 
     if user:
         name = user["name"]
@@ -258,10 +256,7 @@ async def cmd_start(message: Message, state: FSMContext):
         )
 
         keyboard = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="🚀 Продолжить обучение")],
-                [KeyboardButton(text="🔁 Начать заново")]
-            ],
+            keyboard=[[KeyboardButton(text="🚀 Готов, погнали!")]],
             resize_keyboard=True,
             one_time_keyboard=True
         )
@@ -275,19 +270,11 @@ async def cmd_start(message: Message, state: FSMContext):
         await message.answer("👋 Как тебя зовут?")
         await state.set_state(RegisterState.name)
 
-@router.message(lambda msg: msg.text == "🚀 Продолжить обучение")
-async def continue_training(message: Message, state: FSMContext):
+@router.message(lambda msg: msg.text == "🚀 Готов, погнали!")
+async def start_from_welcome(message: Message, state: FSMContext):
     await state.clear()
-    await state.update_data(bot_messages=[])
-
-    await message.answer("Добро пожаловать! Выберите, что хотите сделать.", reply_markup=get_main_menu())
-
-@router.message(lambda msg: msg.text == "🔁 Начать заново")
-async def restart_training(message: Message, state: FSMContext):
-    await state.clear()
-    await message.answer("🔄 Начинаем с начала! 👇")
-    await message.answer("👋 Как тебя зовут?")
-    await state.set_state(RegisterState.name)
+    await message.answer("🚀 Отлично, погнали!", reply_markup=ReplyKeyboardRemove())
+    await message.answer("👇 Главное меню", reply_markup=get_main_menu())
 
 # Отдельный обработчик для кнопки "Начать обучение"
 @router.message(lambda msg: msg.text == "Начать обучение")
