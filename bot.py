@@ -497,17 +497,21 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
+    # Получаем текст сообщения пользователя и убираем лишние пробелы
     text = message.text.strip()
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
-    # Обработка сервисных команд:
+    # Проверяем сервисные команды
+
+    # 1. "❓ Уточнить"
     if text == "❓ Уточнить":
         logging.info("[DEBUG] Пользователь нажал '❓ Уточнить'")
         await state.set_state(TaskState.waiting_for_clarification)
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
 
+    # 2. "🏠 Главное меню"
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
@@ -524,6 +528,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
         return
 
+    # 3. "✅ Показать правильный ответ"
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
         last_question = data.get("last_question")
@@ -543,6 +548,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
+    # 4. "➡️ Следующий вопрос"
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
         grade = data.get("grade")
@@ -557,7 +563,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         name = user["name"]
         new_question = await generate_question(grade, topic, name)
         logging.info(f"[DEBUG] Сгенерирован новый вопрос: {new_question}")
-        await state.update_data(question=new_question, last_score=0)
+        await state.update_data(question=new_question, last_score=0)  # сбрасываем баллы для нового вопроса
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Ответить текстом"), KeyboardButton(text="Ответить голосом")],
@@ -569,13 +575,21 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    # Новая проверка для кнопки "Ответить текстом"
+    # 5. Новая проверка для кнопки "Ответить текстом"
     if text == "Ответить текстом":
         logging.info("[DEBUG] Пользователь выбрал 'Ответить текстом'")
+        # Просто выведем приглашение для ввода текста
         await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # Если сообщение не является сервисной командой, обрабатываем как обычный ответ.
+    # 6. Новая проверка для кнопки "Ответить голосом"
+    if text == "Ответить голосом":
+        logging.info("[DEBUG] Пользователь выбрал 'Ответить голосом'")
+        # Сообщаем пользователю, что теперь он может отправить голосовое сообщение
+        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
+        return
+
+    # Если сообщение не совпадает с сервисными командами, обрабатываем его как ответ:
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
@@ -592,6 +606,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
     feedback_raw = await evaluate_answer(question, message.text, student_name)
     logging.info(f"[DEBUG] RAW FEEDBACK:\n{feedback_raw}")
     
+    import re
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
@@ -635,12 +650,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
 @router.message(lambda msg: msg.content_type == types.ContentType.VOICE)
 async def handle_voice_answer(message: types.Message, state: FSMContext):
-    current_state = await state.get_state()
     # Проверяем, что текущее состояние – ожидание ответа
+    current_state = await state.get_state()
     if current_state != TaskState.waiting_for_answer.state:
         return  # Если не в нужном состоянии, ничего не делаем
 
-    # Остальной код обработки голосового сообщения остаётся неизменным:
+    # Получаем голосовое сообщение и скачиваем файл
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
     file_path = file_info.file_path
@@ -650,6 +665,7 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
     with open(local_filename, "wb") as f:
         f.write(file_data.read())
 
+    # Транскрибируем аудиофайл в текст
     try:
         transcribed_text = await transcribe_audio(local_filename)
         logging.info(f"[DEBUG] Transcribed voice answer: {transcribed_text}")
@@ -658,8 +674,10 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
         await message.answer("❌ Не удалось обработать голосовое сообщение. Попробуйте текстовым способом.")
         return
 
+    # Удаляем локальный аудиофайл
     os.remove(local_filename)
 
+    # Обработка голосового ответа аналогична текстовому:
     data = await state.get_data()
     grade = data.get("grade")
     question = data.get("question")
@@ -675,7 +693,7 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
 
     feedback_raw = await evaluate_answer(question, transcribed_text, student_name)
     logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
-    
+
     import re
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
@@ -690,20 +708,20 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
         criteria_block = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
-    
+
     if new_score > last_score:
         diff = new_score - last_score
         logging.info(f"[DEBUG] Новый балл diff = {diff}")
         await update_user_points(message.from_user.id, diff)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
-    
+
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
     result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
-    
+
     kb = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➡️ Следующий вопрос")],
@@ -713,7 +731,7 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    
+
     await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
 
