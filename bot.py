@@ -417,22 +417,27 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
         return
 
     question = await generate_question(selected_grade, chosen_topic, user["name"])
+    if not question or "Ошибка" in question:
+        await callback.message.answer(
+            "❌ Не удалось сгенерировать вопрос. Попробуйте позже или выберите другую тему.",
+            reply_markup=get_main_menu()
+        )
+        await state.clear()
+        await callback.answer()
+        return
+
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
 
-    # Используем новую клавиатуру
     keyboard = ReplyKeyboardMarkup(
-    keyboard=[
-        [
-            KeyboardButton(text="✍️ Ответить текстом"),
-            KeyboardButton(text="🎤 Ответить голосом")
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+            [KeyboardButton(text="❓ Уточнить по вопросу")],
+            [KeyboardButton(text="🏠 Главное меню")]
         ],
-        [KeyboardButton(text="❓ Уточнить по вопросу")],
-        [KeyboardButton(text="🏠 Главное меню")]
-    ],
-    resize_keyboard=True,
-    one_time_keyboard=True
-)
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
     await callback.message.answer(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\nЧто хотите сделать?",
         reply_markup=keyboard
