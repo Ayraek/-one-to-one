@@ -238,28 +238,56 @@ async def start_answering(callback: CallbackQuery):
 
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    # Получаем данные состояния (если есть сохранённый список bot_messages)
-    data = await state.get_data()
-    bot_messages = data.get("bot_messages", [])
-    
-    # Пытаемся удалить каждое бот-сообщение из списка
-    for msg_id in bot_messages:
-        try:
-            await bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
-        except Exception as e:
-            logging.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
-    
-    # Очищаем состояние полностью и инициализируем пустой список для bot_messages
+    await state.clear()
+
+    user = await get_user_from_db(message.from_user.id)
+
+    # Удалим старые клавиатуры
+    await message.answer("🔄 Перезапуск бота...", reply_markup=ReplyKeyboardRemove())
+
+    if user:
+        name = user["name"]
+        level = user["level"]
+        points = user["points"]
+
+        welcome_text = (
+            f"👋 С возвращением, {name}!\n"
+            f"🎓 Уровень: {level}\n"
+            f"⭐ Баллы: {points}\n\n"
+            "Готов прокачаться сегодня?"
+        )
+
+        keyboard = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🚀 Продолжить обучение")],
+                [KeyboardButton(text="🔁 Начать заново")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+
+        await message.answer(welcome_text, reply_markup=keyboard)
+    else:
+        await message.answer_photo(
+            photo="https://i.imgur.com/zIPzQKF.jpeg",
+            caption="Добро пожаловать в One to One IT Academy!"
+        )
+        await message.answer("👋 Как тебя зовут?")
+        await state.set_state(RegisterState.name)
+
+@router.message(lambda msg: msg.text == "🚀 Продолжить обучение")
+async def continue_training(message: Message, state: FSMContext):
     await state.clear()
     await state.update_data(bot_messages=[])
-    
-    # Отправляем «чистый экран» – одно сообщение с кнопкой "Начать обучение"
-    start_keyboard = types.ReplyKeyboardMarkup(
-        keyboard=[[types.KeyboardButton(text="Начать обучение")]],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer("Нажмите «Начать обучение», чтобы начать.", reply_markup=start_keyboard)
+
+    await message.answer("Добро пожаловать! Выберите, что хотите сделать.", reply_markup=get_main_menu())
+
+@router.message(lambda msg: msg.text == "🔁 Начать заново")
+async def restart_training(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("🔄 Начинаем с начала! 👇")
+    await message.answer("👋 Как тебя зовут?")
+    await state.set_state(RegisterState.name)
 
 # Отдельный обработчик для кнопки "Начать обучение"
 @router.message(lambda msg: msg.text == "Начать обучение")
