@@ -514,21 +514,32 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.clear()
         return
-    # Получаем текст сообщения пользователя и убираем лишние пробелы
+
     text = message.text.strip()
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
-    # Проверяем сервисные команды
+    # ✍️ Ответить текстом
+    if text == "✍️ Ответить текстом":
+        logging.info("[DEBUG] Пользователь выбрал '✍️ Ответить текстом'")
+        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
+        return
 
-    # 1. "❓ Уточнить"
+    # 🎤 Ответить голосом
+    if text == "🎤 Ответить голосом":
+        logging.info("[DEBUG] Пользователь выбрал '🎤 Ответить голосом'")
+        await state.set_state(TaskState.waiting_for_voice)
+        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
+        return
+
+    # ❓ Уточнить
     if text == "❓ Уточнить":
         logging.info("[DEBUG] Пользователь нажал '❓ Уточнить'")
         await state.set_state(TaskState.waiting_for_clarification)
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # 2. "🏠 Главное меню"
+    # 🏠 Главное меню
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
@@ -546,34 +557,34 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # 3. "✅ Показать правильный ответ"
+    # ✅ Показать правильный ответ
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
-    last_question = data.get("last_question")
-    last_grade = data.get("last_grade")
+        last_question = data.get("last_question")
+        last_grade = data.get("last_grade")
 
-    if not last_question or not last_grade:
-        await message.answer(
-            "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ. "
-            "Сначала пройдите задание.",
-            reply_markup=get_main_menu()
+        if not last_question or not last_grade:
+            await message.answer(
+                "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ. "
+                "Сначала пройдите задание.",
+                reply_markup=get_main_menu()
+            )
+            await state.clear()
+            return
+
+        correct_answer = await generate_correct_answer(last_question, last_grade)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="➡️ Следующий вопрос")],
+                [KeyboardButton(text="🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
         )
-        await state.clear()
+        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
-    correct_answer = await generate_correct_answer(last_question, last_grade)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
-    return
-
-    # 4. "➡️ Следующий вопрос"   
+    # ➡️ Следующий вопрос
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
         grade = data.get("grade")
@@ -591,7 +602,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.update_data(question=new_question, last_score=0)
         kb = ReplyKeyboardMarkup(
             keyboard=[
-                [KeyboardButton(text="Ответить текстом"), KeyboardButton(text="Ответить голосом")],
+                [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
                 [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
             ],
             resize_keyboard=True,
@@ -600,26 +611,14 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    # 5. Кнопка "Ответить текстом"
-    if text == "✍️ Ответить текстом":
-        logging.info("[DEBUG] Пользователь выбрал '✍️ Ответить текстом'")
-        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
-        return
-
-    # 6. Кнопка "Ответить голосом"
-    if text == "🎤 Ответить голосом":
-        logging.info("[DEBUG] Пользователь выбрал '🎤 Ответить голосом'")
-        await state.set_state(TaskState.waiting_for_voice)
-        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
-        return
-
-       # Если не команда — это текстовый ответ, переходим к оценке
+    # 📝 Обработка текстового ответа
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
     if not grade or not question:
         await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
         return
+
     user = await get_user_from_db(message.from_user.id)
     if not user:
         await message.answer("⚠️ Пользователь не найден.")
@@ -652,10 +651,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    logging.info(f"[DEBUG] new_score: {new_score}, last_score: {last_score}")
     if new_score > last_score:
         diff = new_score - last_score
-        logging.info(f"[DEBUG] Новый балл diff = {diff}")
         await update_user_points(message.from_user.id, diff)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
