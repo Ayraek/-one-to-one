@@ -633,20 +633,23 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
 
-@router.message(content_types=types.ContentType.VOICE, state=TaskState.waiting_for_answer)
+@router.message(lambda msg: msg.content_type == types.ContentType.VOICE)
 async def handle_voice_answer(message: types.Message, state: FSMContext):
-    # Получаем информацию о голосовом сообщении
+    current_state = await state.get_state()
+    # Проверяем, что текущее состояние – ожидание ответа
+    if current_state != TaskState.waiting_for_answer.state:
+        return  # Если не в нужном состоянии, ничего не делаем
+
+    # Остальной код обработки голосового сообщения остаётся неизменным:
     voice = message.voice
     file_info = await bot.get_file(voice.file_id)
     file_path = file_info.file_path
 
-    # Скачиваем аудиофайл с Telegram
     file_data = await bot.download_file(file_path)
     local_filename = "voice_message.ogg"
     with open(local_filename, "wb") as f:
         f.write(file_data.read())
 
-    # Транскрибируем аудиофайл в текст через OpenAI Whisper
     try:
         transcribed_text = await transcribe_audio(local_filename)
         logging.info(f"[DEBUG] Transcribed voice answer: {transcribed_text}")
@@ -655,10 +658,8 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
         await message.answer("❌ Не удалось обработать голосовое сообщение. Попробуйте текстовым способом.")
         return
 
-    # Удаляем локальный файл, так как он больше не нужен
     os.remove(local_filename)
 
-    # Используем транскрибированный текст как ответ
     data = await state.get_data()
     grade = data.get("grade")
     question = data.get("question")
@@ -672,10 +673,10 @@ async def handle_voice_answer(message: types.Message, state: FSMContext):
         return
     student_name = user["name"]
 
-    # Оцениваем ответ с транскрибированным текстом
     feedback_raw = await evaluate_answer(question, transcribed_text, student_name)
     logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
     
+    import re
     pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
