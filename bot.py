@@ -567,7 +567,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         name = user["name"]
         new_question = await generate_question(grade, topic, name)
         logging.info(f"[DEBUG] Сгенерирован новый вопрос: {new_question}")
-        await state.update_data(question=new_question, last_score=0)  # сбрасываем баллы для нового вопроса
+        await state.update_data(question=new_question, last_score=0)
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="Ответить текстом"), KeyboardButton(text="Ответить голосом")],
@@ -579,22 +579,77 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    # 5. Новая проверка для кнопки "Ответить текстом"
+    # 5. Кнопка "Ответить текстом"
     if text == "Ответить текстом":
         logging.info("[DEBUG] Пользователь выбрал 'Ответить текстом'")
-        # Просто выведем приглашение для ввода текста
         await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # 6. Новая проверка для кнопки "Ответить голосом"
+    # 6. Кнопка "Ответить голосом"
     if text == "Ответить голосом":
         logging.info("[DEBUG] Пользователь выбрал 'Ответить голосом'")
-        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_voice)
+        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    # Если пользователь еще не выбрал ни "Ответить текстом", ни "Ответить голосом", ничего не делаем
-    await message.answer("❗ Пожалуйста, выберите способ ответа: текстом или голосом.")
+    # Если не команда — это текстовый ответ, переходим к оценке
+    grade = data.get("grade")
+    question = data.get("question")
+    last_score = data.get("last_score", 0.0)
+    if not grade or not question:
+        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
+        return
+    user = await get_user_from_db(message.from_user.id)
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.")
+        return
+
+    student_name = user["name"]
+    logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
+    feedback_raw = await evaluate_answer(question, message.text, student_name)
+    logging.info(f"[DEBUG] RAW FEEDBACK:\n{feedback_raw}")
+
+    import re
+    pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
+    match = re.search(pattern, feedback_raw, re.DOTALL)
+    if match:
+        criteria_block = match.group(1).strip()
+        try:
+            new_score = float(match.group(2))
+        except ValueError:
+            new_score = 0.0
+        feedback_text = match.group(3).strip()
+    else:
+        criteria_block = ""
+        new_score = 0.0
+        feedback_text = feedback_raw.strip()
+
+    logging.info(f"[DEBUG] new_score: {new_score}, last_score: {last_score}")
+    if new_score > last_score:
+        diff = new_score - last_score
+        logging.info(f"[DEBUG] Новый балл diff = {diff}")
+        await update_user_points(message.from_user.id, diff)
+        await update_level(message.from_user.id)
+        await state.update_data(last_score=new_score)
+
+    result_msg = ""
+    if criteria_block:
+        result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
+    result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="✅ Показать правильный ответ")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=kb)
+    await state.update_data(last_question=question, last_grade=grade)
 
 @router.message(lambda msg: msg.content_type == types.ContentType.VOICE)
 async def handle_voice_answer(message: types.Message, state: FSMContext):
