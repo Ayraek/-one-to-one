@@ -540,22 +540,30 @@ async def handle_task_answer(message: Message, state: FSMContext):
     # 3. "✅ Показать правильный ответ"
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
-        last_question = data.get("last_question")
-        last_grade = data.get("last_grade")
-        if not last_question or not last_grade:
-            await message.answer("⚠️ Ошибка: не найден текущий вопрос или грейд.")
-            return
-        correct_answer = await generate_correct_answer(last_question, last_grade)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➡️ Следующий вопрос")],
-                [KeyboardButton(text="🏠 Главное меню")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
+    last_question = data.get("last_question")
+    last_grade = data.get("last_grade")
+
+    if not last_question or not last_grade:
+        await message.answer(
+            "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ. "
+            "Сначала пройдите задание.",
+            reply_markup=get_main_menu()
         )
-        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
+        await state.clear()
         return
+
+    correct_answer = await generate_correct_answer(last_question, last_grade)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
+    return
+
 
     # 4. "➡️ Следующий вопрос"
     if text == "➡️ Следующий вопрос":
