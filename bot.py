@@ -700,6 +700,37 @@ async def process_voice_message(message: Message, state: FSMContext):
         await state.clear()
         return
     
+    if text == "➡️ Следующий вопрос":
+        logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос' в голосовом режиме")
+        data = await state.get_data()
+        grade = data.get("grade")
+        topic = data.get("selected_topic")
+    if not grade or not topic:
+        await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
+        return
+
+    user = await get_user_from_db(message.from_user.id)
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
+        return
+
+    name = user["name"]
+    new_question = await generate_question(grade, topic, name)
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(question=new_question, last_score=0)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+            [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
+    return
+
     if text == "✅ Показать правильный ответ":
         logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в режиме голосового ответа")
         data = await state.get_data()
