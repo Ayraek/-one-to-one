@@ -236,47 +236,30 @@ async def start_answering(callback: CallbackQuery):
     )
     await callback.answer()
 
-# Обработчик для /start
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
-    await state.clear()  # Очистка старого состояния
-    await state.update_data(bot_messages=[])  # Обнуляем список ID сообщений бота
-    user = await get_user_from_db(message.from_user.id)
+    # Получаем данные состояния (если есть сохранённый список bot_messages)
+    data = await state.get_data()
+    bot_messages = data.get("bot_messages", [])
     
-    if user is None:
-        # Если не зарегистрирован: показываем логотип и кнопку "Начать обучение"
-        logo_msg = await message.answer_photo(
-            photo="https://i.imgur.com/zIPzQKF.jpeg",
-            caption="Добро пожаловать в One to One IT Academy!"
-        )
-        data = await state.get_data()
-        bot_messages = data.get("bot_messages", [])
-        bot_messages.append(logo_msg.message_id)
-        await state.update_data(bot_messages=bot_messages)
-        
-        start_keyboard = types.ReplyKeyboardMarkup(
-            keyboard=[[types.KeyboardButton(text="Начать обучение")]],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        start_msg = await message.answer("Нажмите «Начать обучение», чтобы начать.", reply_markup=start_keyboard)
-        data = await state.get_data()
-        bot_messages = data.get("bot_messages", [])
-        bot_messages.append(start_msg.message_id)
-        await state.update_data(bot_messages=bot_messages)
-    else:
-        # Если пользователь зарегистрирован: приветствие и главное меню
-        name = user["name"]
-        age = user["age"]
-        level = user["level"]
-        points = user["points"]
-        points_str = f"{points:.2f}"
-        welcome = f"👋 Привет, {name}!\n{welcome_text}\n<b>⭐ Баллы:</b> {points_str}"
-        main_menu_msg = await message.answer(welcome, reply_markup=get_main_menu(), parse_mode="HTML")
-        data = await state.get_data()
-        bot_messages = data.get("bot_messages", [])
-        bot_messages.append(main_menu_msg.message_id)
-        await state.update_data(bot_messages=bot_messages)
+    # Пытаемся удалить каждое бот-сообщение из списка
+    for msg_id in bot_messages:
+        try:
+            await bot.delete_message(chat_id=message.chat.id, message_id=msg_id)
+        except Exception as e:
+            logging.warning(f"Не удалось удалить сообщение {msg_id}: {e}")
+    
+    # Очищаем состояние полностью и инициализируем пустой список для bot_messages
+    await state.clear()
+    await state.update_data(bot_messages=[])
+    
+    # Отправляем «чистый экран» – одно сообщение с кнопкой "Начать обучение"
+    start_keyboard = types.ReplyKeyboardMarkup(
+        keyboard=[[types.KeyboardButton(text="Начать обучение")]],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("Нажмите «Начать обучение», чтобы начать.", reply_markup=start_keyboard)
 
 # Отдельный обработчик для кнопки "Начать обучение"
 @router.message(lambda msg: msg.text == "Начать обучение")
