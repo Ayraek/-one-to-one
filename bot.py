@@ -506,6 +506,14 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
+    current_state = await state.get_state()
+    if current_state != TaskState.waiting_for_answer.state:
+        await message.answer(
+            "⚠️ Сейчас нет активного задания. Сначала получите задание и тему.",
+            reply_markup=get_main_menu()
+        )
+        await state.clear()
+        return
     # Получаем текст сообщения пользователя и убираем лишние пробелы
     text = message.text.strip()
     logging.info(f"[DEBUG] Received text: {repr(text)}")
@@ -565,8 +573,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
     return
 
-
-    # 4. "➡️ Следующий вопрос"
+    # 4. "➡️ Следующий вопрос"   
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
         grade = data.get("grade")
