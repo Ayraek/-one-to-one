@@ -859,15 +859,14 @@ async def generate_correct_answer(question: str, grade: str) -> str:
         logging.error(f"Ошибка генерации эталонного ответа: {e}")
         return "❌ Ошибка генерации эталонного ответа."
 
-
 async def transcribe_audio(file_path: str) -> str:
     with open(file_path, "rb") as audio_file:
-        transcription = await asyncio.to_thread(
-            client.Audio.transcribe,
+        response = await asyncio.to_thread(
+            client.audio.transcriptions.create,
             model="whisper-1",
             file=audio_file
         )
-    return transcription["text"]
+    return response.text
 
 # --------------------------
 # Запуск бота
