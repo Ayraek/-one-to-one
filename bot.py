@@ -720,7 +720,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
+    pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
         criteria_block = match.group(1).strip()
@@ -748,7 +748,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
     score=new_score
 )
 
-
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
@@ -774,26 +773,23 @@ async def handle_task_answer(message: Message, state: FSMContext):
 async def process_voice_message(message: Message, state: FSMContext):
     text = message.text.strip() if message.text else ""
 
-    # --- Главное меню ---
+    # Главное меню
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню' в голосовом режиме")
         user = await get_user_from_db(message.from_user.id)
-        if user:
-            profile_text = (
-                f"<b>👤 Имя:</b> {user['name']}\n"
-                f"<b>🎂 Возраст:</b> {user['age']}\n"
-                f"<b>🎯 Уровень:</b> {user['level']}\n"
-                f"<b>⭐ Баллы:</b> {user['points']}\n\n"
-                "Вы в главном меню:"
-            )
-        else:
-             profile_text = "Пользователь не найден. Вы в главном меню."
+        profile_text = (
+            f"<b>👤 Имя:</b> {user['name'] if user else '—'}\n"
+            f"<b>🎂 Возраст:</b> {user['age'] if user else '—'}\n"
+            f"<b>🎯 Уровень:</b> {user['level'] if user else '—'}\n"
+            f"<b>⭐ Баллы:</b> {user['points'] if user else '—'}\n\n"
+            "Вы в главном меню:"
+        )
         await message.answer(profile_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
         await message.answer("👇 Главное меню", reply_markup=get_main_menu())
         await state.clear()
         return
 
-    # --- Следующий вопрос ---
+    # Следующий вопрос
     if text == "➡️ Следующий вопрос":
         logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос' в голосовом режиме")
         data = await state.get_data()
@@ -806,11 +802,9 @@ async def process_voice_message(message: Message, state: FSMContext):
         if not user:
             await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
             return
-        name = user["name"]
-        new_question = await generate_question(grade, topic, name)
+        new_question = await generate_question(grade, topic, user["name"])
         await state.set_state(TaskState.waiting_for_answer)
         await state.update_data(question=new_question, last_score=0)
-
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
@@ -822,21 +816,16 @@ async def process_voice_message(message: Message, state: FSMContext):
         await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
         return
 
-    # --- Показать правильный ответ ---
+    # Показать правильный ответ
     if text == "✅ Показать правильный ответ":
-        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ' в голосовом режиме")
+        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
         data = await state.get_data()
         last_question = data.get("last_question")
         last_grade = data.get("last_grade")
-
         if not last_question or not last_grade:
-            await message.answer(
-                "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ.",
-                reply_markup=get_main_menu()
-            )
+            await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
             await state.clear()
             return
-
         correct_answer = await generate_correct_answer(last_question, last_grade)
         kb = ReplyKeyboardMarkup(
             keyboard=[
@@ -849,12 +838,12 @@ async def process_voice_message(message: Message, state: FSMContext):
         await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
         return
 
-    # --- Если пользователь не отправил голос ---
+    # Проверка на наличие голосового сообщения
     if not message.voice:
         await message.answer("⚠️ Пожалуйста, отправьте именно голосовое сообщение.")
         return
 
-    # --- Обработка голосового файла ---
+    # Обработка файла
     voice = message.voice
     file = await bot.get_file(voice.file_id)
     file_path = file.file_path
@@ -871,7 +860,7 @@ async def process_voice_message(message: Message, state: FSMContext):
     os.remove(save_path)
     await message.answer(f"📝 Расшифровка: «{text}»\nОцениваю...")
 
-    # --- Оценка ответа ---
+    # Оценка
     data = await state.get_data()
     question = data.get("question")
     grade = data.get("grade")
@@ -886,15 +875,12 @@ async def process_voice_message(message: Message, state: FSMContext):
     logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
 
     if not feedback_raw or "Ошибка" in feedback_raw:
-        await message.answer(
-            "❌ Произошла ошибка при оценке голосового ответа. Попробуйте снова или воспользуйтесь текстом.",
-            reply_markup=get_main_menu()
-        )
+        await message.answer("❌ Ошибка при оценке ответа. Попробуйте снова.", reply_markup=get_main_menu())
         await state.clear()
         return
 
     import re
-    pattern = r"Критерии:\s*(.*?)Score:\s*([\d.]+)\s*Feedback:\s*(.*)"
+    pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
         criteria_block = match.group(1).strip()
@@ -913,15 +899,14 @@ async def process_voice_message(message: Message, state: FSMContext):
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
         await save_user_answer(
-    user_id=message.from_user.id,
-    question=question,
-    answer=text,
-    grade=grade,
-    topic=data.get("selected_topic", "—"),
-    score=new_score
-)
+            user_id=message.from_user.id,
+            question=question,
+            answer=text,
+            grade=grade,
+            topic=data.get("selected_topic", "—"),
+            score=new_score
+        )
 
-    # --- Формирование результата ---
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
@@ -939,7 +924,7 @@ async def process_voice_message(message: Message, state: FSMContext):
     )
 
     await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("Что делаем дальше?", reply_markup=kb)
+    await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer) 
 
@@ -991,24 +976,28 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
     prompt = (
         f"Вопрос: {question}\n"
         f"Ответ студента: {student_answer}\n\n"
-        "Проанализируй ответ по 5 критериям:\n"
-        "1. Соответствие вопросу\n"
-        "2. Полнота\n"
-        "3. Аргументация\n"
-        "4. Структура\n"
-        "5. Примеры\n\n"
-        "Для каждого критерия выбери один из вариантов: ✅, ⚠️ или ❌.\n"
-        "Определи итоговую оценку (Score) от 0.0 до 1.0.\n"
-        "Выведи результат строго в формате:\n\n"
+        "Проанализируй ответ пользователя по следующей схеме. "
+        "Всего 5 критериев. Каждый оценивается от 0 до 0.2 баллов (шаг 0.05). "
+        "Если критерий 'Соответствие вопросу' равен 0.0 — остальные не учитываются, и итоговая оценка = 0.0. "
+        "Если он больше 0.0, оцени остальные 4 критерия.\n\n"
         "Критерии:\n"
-        "🔹 Соответствие вопросу: <эмоджи>\n"
-        "🔹 Полнота: <эмоджи>\n"
-        "🔹 Аргументация: <эмоджи>\n"
-        "🔹 Структура: <эмоджи>\n"
-        "🔹 Примеры: <эмоджи>\n\n"
-        "Score: <число>\n"
-        "Feedback: Ваш ответ... (обратись к студенту на «Вы», но не здоровайся)"
+        "• Соответствие вопросу\n"
+        "• Полнота\n"
+        "• Аргументация\n"
+        "• Структура\n"
+        "• Примеры\n\n"
+        "Ответ строго в формате:\n\n"
+        "Критерии:\n"
+        "• Соответствие вопросу: <балл>\n"
+        "• Полнота: <балл>\n"
+        "• Аргументация: <балл>\n"
+        "• Структура: <балл>\n"
+        "• Примеры: <балл>\n\n"
+        "Итог: <сумма баллов>\n"
+        "Feedback: <текстовая обратная связь для пользователя>\n\n"
+        "Поясни в Feedback, что именно не так (если есть недочёты), или похвали за хорошую работу (если всё ок)."
     )
+
     try:
         response = await asyncio.to_thread(
             client.chat.completions.create,
