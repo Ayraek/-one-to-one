@@ -1132,8 +1132,7 @@ async def get_or_generate_analytics(user_id: int):
         # Примерно считаем средние значения — можно заменить на реальные вычисления
         averages = await conn.fetchrow('''
             SELECT 
-                ROUND(AVG(score), 2) as avg_score,
-                ROUND(AVG((score/1.0) * 0.2), 2) as relevant_score
+                ROUND(AVG(score)::numeric, 2) as avg_score,
             FROM answers
             WHERE user_id = $1
         ''', user_id)
