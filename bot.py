@@ -602,30 +602,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
     if text == "✍️ Ответить":
         await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
         return
-    # ✍️ Ответить текстом
+
     if text == "✍️ Ответить текстом":
         logging.info("[DEBUG] Пользователь выбрал '✍️ Ответить текстом'")
-    await state.set_state(TaskState.waiting_for_answer)
-    await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
-    return
+        await state.set_state(TaskState.waiting_for_answer)
+        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
+        return
 
-
-    # 🎤 Ответить голосом
     if text == "🎤 Ответить голосом":
         logging.info("[DEBUG] Пользователь выбрал '🎤 Ответить голосом'")
-    await state.set_state(TaskState.waiting_for_voice)  # 👈 Это у тебя уже есть
-    await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
-    return
+        await state.set_state(TaskState.waiting_for_voice)
+        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
+        return
 
-
-    # ❓ Уточнить
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
         logging.info("[DEBUG] Пользователь нажал '❓ Уточнить'")
-    await state.set_state(TaskState.waiting_for_clarification)
-    await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
-    return
+        await state.set_state(TaskState.waiting_for_clarification)
+        await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
+        return
 
-    # 🏠 Главное меню
     if text == "🏠 Главное меню":
         logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
@@ -639,6 +634,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
             )
         else:
             profile_text = "Пользователь не найден. Вы в главном меню."
+
         await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
         await state.clear()
         return
