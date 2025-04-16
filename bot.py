@@ -616,11 +616,11 @@ async def handle_task_answer(message: Message, state: FSMContext):
         return
 
     # ❓ Уточнить
-    if text == "❓ Уточнить":
+    if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
         logging.info("[DEBUG] Пользователь нажал '❓ Уточнить'")
-        await state.set_state(TaskState.waiting_for_clarification)
-        await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
-        return
+    await state.set_state(TaskState.waiting_for_clarification)
+    await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
+    return
 
     # 🏠 Главное меню
     if text == "🏠 Главное меню":
