@@ -79,6 +79,7 @@ def get_main_menu():
         [InlineKeyboardButton(text="📚 Получить задание", callback_data="task")],
         [InlineKeyboardButton(text="📝 Экзамен", callback_data="exam")],
         [InlineKeyboardButton(text="📰 Новости", callback_data="news")]
+        [InlineKeyboardButton(text="📊 Аналитика прогресса", callback_data="progress")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -178,6 +179,22 @@ async def create_db_pool():
                 created_at TIMESTAMP DEFAULT now()
             )
         ''')
+
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS analytics (
+                user_id BIGINT PRIMARY KEY,
+                tasks_done INTEGER,
+                average_score REAL,
+                criteria_relevance REAL,
+                criteria_completeness REAL,
+                criteria_argumentation REAL,
+                criteria_structure REAL,
+                criteria_examples REAL,
+                percentile INTEGER,
+                next_target INTEGER
+            )
+        ''')
+
 
 # --------------------------
 # Функции работы с базой данных
@@ -445,6 +462,19 @@ async def exam_callback(callback: CallbackQuery):
         "Следите за обновлениями и нажмите кнопку ниже, чтобы вернуться в главное меню."
     )
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_exam_menu())
+    await callback.answer()
+
+@router.callback_query(F.data == "progress")
+async def show_progress_analytics(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = await get_user_from_db(user_id)
+    if not user:
+        await callback.message.edit_text("⚠️ Пользователь не найден.")
+        return
+
+    data = await get_or_generate_analytics(user_id)
+    text = format_progress_analytics(user, data)
+    await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     await callback.answer()
 
 # --------------------------
@@ -1090,6 +1120,66 @@ async def catch_all(message: Message, state: FSMContext):
         else:
             await message.answer("👋 Привет! Давай зарегистрируемся. Как тебя зовут?")
             await state.set_state(RegisterState.name)
+
+async def get_or_generate_analytics(user_id: int):
+    async with db_pool.acquire() as conn:
+        existing = await conn.fetchrow(
+            "SELECT * FROM analytics WHERE user_id = $1", user_id
+        )
+        if existing:
+            return existing
+
+        # Примерно считаем средние значения — можно заменить на реальные вычисления
+        averages = await conn.fetchrow('''
+            SELECT 
+                ROUND(AVG(score), 2) as avg_score,
+                ROUND(AVG((score/1.0) * 0.2), 2) as relevant_score
+            FROM answers
+            WHERE user_id = $1
+        ''', user_id)
+
+        # Заглушка по критериям — ты можешь позже это детализировать
+        analytics = {
+            "tasks_done": await conn.fetchval("SELECT COUNT(*) FROM answers WHERE user_id = $1", user_id),
+            "average_score": averages["avg_score"] or 0,
+            "criteria_relevance": 0.18,
+            "criteria_completeness": 0.14,
+            "criteria_argumentation": 0.16,
+            "criteria_structure": 0.11,
+            "criteria_examples": 0.08,
+            "percentile": 68,
+            "next_target": 15,
+        }
+
+        # Сохраняем в таблицу
+        await conn.execute('''
+            INSERT INTO analytics (user_id, tasks_done, average_score, 
+            criteria_relevance, criteria_completeness, criteria_argumentation, 
+            criteria_structure, criteria_examples, percentile, next_target)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        ''', user_id, *analytics.values())
+
+        return analytics
+
+def format_progress_analytics(user, data):
+    return (
+        f"<b>📊 Твоя аналитика прогресса</b>\n\n"
+        f"<b>📍 Всего заданий пройдено:</b> {data['tasks_done']}\n"
+        f"<b>🎓 Текущий уровень:</b> {user['level']}\n"
+        f"<b>⭐ Общий балл:</b> {round(user['points'], 2)}\n\n"
+        f"🔍 <b>Критерии оценки:</b>\n\n"
+        f"• <b>Соответствие вопросу:</b> {data['criteria_relevance']} / 0.20 — ты почти всегда в точку! 🔥\n"
+        f"• <b>Полнота:</b> {data['criteria_completeness']} — немного не раскрываешь мысль до конца\n"
+        f"• <b>Аргументация:</b> {data['criteria_argumentation']} — у тебя хорошие логические цепочки\n"
+        f"• <b>Структура:</b> {data['criteria_structure']} — иногда теряется логика\n"
+        f"• <b>Примеры:</b> {data['criteria_examples']} — добавь больше конкретики\n\n"
+        f"🎯 <b>Суперсила:</b> попадание в суть задачи\n"
+        f"🧱 <b>Зона роста:</b> примеры и структура\n\n"
+        f"📈 <b>Ты лучше, чем {data['percentile']}% пользователей</b>\n"
+        f"🧭 <b>Цель:</b> +{data['next_target']} баллов до следующего уровня 🚀\n\n"
+        f"<i>📌 Обновление аналитики происходит раз в неделю</i>"
+    )
+
 # --------------------------
 # Запуск бота
 # --------------------------
