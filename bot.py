@@ -505,7 +505,10 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "clarify_info")
 async def clarify_info_callback(callback: CallbackQuery, state: FSMContext):
     await state.set_state(TaskState.waiting_for_clarification)
-    await callback.message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
+    await callback.message.answer(
+        "✏️ Напишите, что именно хотите уточнить по заданию:",
+        reply_markup=ReplyKeyboardRemove()
+    )
     await callback.answer()
 
 @router.message(TaskState.waiting_for_clarification)
@@ -514,15 +517,23 @@ async def process_clarification(message: Message, state: FSMContext):
     question = data.get("question")
     user = await get_user_from_db(message.from_user.id)
     name = user["name"] if user else "кандидат"
+
+    if not question:
+        await message.answer("⚠️ Нет активного вопроса для уточнения. Сначала получите задание.")
+        await state.clear()
+        return
+
     clarification_prompt = (
         f"Вопрос: {question}\n"
         f"Уточнение от кандидата {name}:\n{message.text.strip()}\n\n"
-        "Ответ должен быть кратким, конкретным и направляющим. Если уточнение звучит как 'Мне описать все инструменты или только один?', "
+        "Ответ должен быть кратким, конкретным и направляющим. "
+        "Если уточнение звучит как 'Мне описать все инструменты или только один?', "
         "то ответ: 'Чем больше инструментов вы опишете, тем лучше. Приведите примеры и раскройте каждый по отдельности'. "
         "Если уточнение звучит как 'Дай мне пример конкретного продукта', то ответ: 'Возьмите для примера продукт X, он отлично подходит для этого задания'. "
         "Если уточнение не по теме, напомните: 'Пожалуйста, спрашивайте только в рамках данного задания'. "
         "Дайте ответ строго по теме вопроса, без лишних вступлений."
     )
+
     try:
         clarification_response = await asyncio.to_thread(
             client.chat.completions.create,
@@ -531,27 +542,33 @@ async def process_clarification(message: Message, state: FSMContext):
                 {
                     "role": "system",
                     "content": (
-                        "Ты проводишь собеседование по продакт-менеджменту. Отвечай кратко, по сути и только по теме, без приветствий."
+                        "Ты проводишь собеседование по продакт-менеджменту. "
+                        "Отвечай кратко, по сути и только по теме, без приветствий."
                     )
                 },
                 {"role": "user", "content": clarification_prompt}
             ],
-            max_tokens=150,
+            max_tokens=200,
             temperature=0.3
         )
         reply = clarification_response.choices[0].message.content.strip()
     except Exception as e:
         logging.error(f"Ошибка при уточнении: {e}")
         reply = "❌ Не удалось получить ответ на уточнение. Попробуйте снова."
+
     reply_keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="✍️ Ответить")],
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
             [KeyboardButton(text="🏠 Главное меню")]
         ],
         resize_keyboard=True,
         one_time_keyboard=True
     )
-    await message.answer(f"📎 Уточнение:\n{reply}\n\nЧто делаем дальше?", reply_markup=reply_keyboard)
+
+    await message.answer(
+        f"📎 Уточнение:\n{reply}\n\nЧто делаем дальше?",
+        reply_markup=reply_keyboard
+    )
     await state.set_state(TaskState.waiting_for_answer)
 
 # --------------------------
