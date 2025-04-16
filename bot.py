@@ -257,7 +257,7 @@ async def show_profile(callback: CallbackQuery):
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
             f"<b>🎯 Уровень:</b> {level}\n"
-            f"<b>⭐ Баллы:</b> {points}\n\n"
+            f"<b>⭐ Баллы:</b> {round(points, 2)}\n\n"
             f"<b>🕘 Последние ответы:</b>\n{history_lines}"
         )
 
