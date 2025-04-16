@@ -250,7 +250,7 @@ async def show_profile(callback: CallbackQuery):
             ''', callback.from_user.id)
 
         history_lines = "\n".join([
-            f"• {r['topic']} ({r['grade']}) — {r['score']}" for r in rows
+            f"• {r['topic']} ({r['grade']}) — {round(r['score'], 2)}" for r in rows
         ]) if rows else "— пока нет"
 
         text = (
