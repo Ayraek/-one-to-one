@@ -605,15 +605,18 @@ async def handle_task_answer(message: Message, state: FSMContext):
     # ✍️ Ответить текстом
     if text == "✍️ Ответить текстом":
         logging.info("[DEBUG] Пользователь выбрал '✍️ Ответить текстом'")
-        await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
-        return
+    await state.set_state(TaskState.waiting_for_answer)
+    await message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=types.ReplyKeyboardRemove())
+    return
+
 
     # 🎤 Ответить голосом
     if text == "🎤 Ответить голосом":
         logging.info("[DEBUG] Пользователь выбрал '🎤 Ответить голосом'")
-        await state.set_state(TaskState.waiting_for_voice)
-        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
-        return
+    await state.set_state(TaskState.waiting_for_voice)  # 👈 Это у тебя уже есть
+    await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.", reply_markup=types.ReplyKeyboardRemove())
+    return
+
 
     # ❓ Уточнить
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
@@ -942,6 +945,7 @@ async def process_voice_message(message: Message, state: FSMContext):
     await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
+    await state.set_state(TaskState.waiting_for_answer) 
 
 # --------------------------
 # Дополнительный callback для "next_question"
