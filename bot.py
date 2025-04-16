@@ -78,7 +78,7 @@ def get_main_menu():
         [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")],
         [InlineKeyboardButton(text="📚 Получить задание", callback_data="task")],
         [InlineKeyboardButton(text="📝 Экзамен", callback_data="exam")],
-        [InlineKeyboardButton(text="📰 Новости", callback_data="news")]
+        [InlineKeyboardButton(text="📰 Новости", callback_data="news")],
         [InlineKeyboardButton(text="📊 Аналитика прогресса", callback_data="progress")]
     ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
