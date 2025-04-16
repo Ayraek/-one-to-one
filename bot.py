@@ -226,6 +226,18 @@ async def update_level(user_id: int):
             )
         logging.info(f"Пользователь {user_id} повышен с {current_level} до {new_level}.")
 
+async def get_user_rank(user_id: int) -> int:
+    async with db_pool.acquire() as conn:
+        rows = await conn.fetch('''
+            SELECT id
+            FROM users
+            ORDER BY points DESC
+        ''')
+        ids = [row['id'] for row in rows]
+        if user_id in ids:
+            return ids.index(user_id) + 1  # позиция +1, т.к. с нуля
+        return -1  # если вдруг не нашли
+
 # --------------------------
 # Обработчики коллбэков и команд
 # --------------------------
@@ -238,6 +250,7 @@ async def show_profile(callback: CallbackQuery):
         age = user["age"]
         level = user["level"]
         points = user["points"]
+        rank = await get_user_rank(callback.from_user.id)
 
         # Получаем последние 3 ответа
         async with db_pool.acquire() as conn:
@@ -258,6 +271,7 @@ async def show_profile(callback: CallbackQuery):
             f"<b>🎂 Возраст:</b> {age}\n"
             f"<b>🎯 Уровень:</b> {level}\n"
             f"<b>⭐ Баллы:</b> {round(points, 2)}\n\n"
+            f"<b>🏆 Рейтинг:</b> {rank}-е место\n\n"
             f"<b>🕘 Последние ответы:</b>\n{history_lines}"
         )
 
