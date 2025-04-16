@@ -165,6 +165,20 @@ async def create_db_pool():
             )
         ''')
 
+        # 👇 Вот это добавляешь СРАЗУ после users
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS answers (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT,
+                question TEXT,
+                answer TEXT,
+                grade TEXT,
+                topic TEXT,
+                score REAL,
+                created_at TIMESTAMP DEFAULT now()
+            )
+        ''')
+
 # --------------------------
 # Функции работы с базой данных
 # --------------------------
@@ -187,6 +201,13 @@ async def update_user_points(user_id: int, additional_points: float):
             'UPDATE users SET points = points + $1 WHERE id = $2',
             additional_points, user_id
         )
+
+async def save_user_answer(user_id: int, question: str, answer: str, grade: str, topic: str, score: float):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO answers (user_id, question, answer, grade, topic, score)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        ''', user_id, question, answer, grade, topic, score)
 
 async def update_level(user_id: int):
     user = await get_user_from_db(user_id)
@@ -217,15 +238,33 @@ async def show_profile(callback: CallbackQuery):
         age = user["age"]
         level = user["level"]
         points = user["points"]
+
+        # Получаем последние 3 ответа
+        async with db_pool.acquire() as conn:
+            rows = await conn.fetch('''
+                SELECT topic, grade, score
+                FROM answers
+                WHERE user_id = $1
+                ORDER BY created_at DESC
+                LIMIT 3
+            ''', callback.from_user.id)
+
+        history_lines = "\n".join([
+            f"• {r['topic']} ({r['grade']}) — {r['score']}" for r in rows
+        ]) if rows else "— пока нет"
+
         text = (
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
             f"<b>🎯 Уровень:</b> {level}\n"
-            f"<b>⭐ Баллы:</b> {points}\n"
+            f"<b>⭐ Баллы:</b> {points}\n\n"
+            f"<b>🕘 Последние ответы:</b>\n{history_lines}"
         )
+
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     else:
         await callback.message.edit_text(welcome_text, reply_markup=get_main_menu())
+
     await callback.answer()
 
 @router.callback_query(F.data == "start_answering")
@@ -675,6 +714,15 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await update_user_points(message.from_user.id, diff)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
+        await save_user_answer(
+    user_id=message.from_user.id,
+    question=question,
+    answer=message.text,
+    grade=grade,
+    topic=data.get("selected_topic", "—"),
+    score=new_score
+)
+
 
     result_msg = ""
     if criteria_block:
@@ -839,6 +887,14 @@ async def process_voice_message(message: Message, state: FSMContext):
         await update_user_points(message.from_user.id, new_score - last_score)
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
+        await save_user_answer(
+    user_id=message.from_user.id,
+    question=question,
+    answer=text,
+    grade=grade,
+    topic=data.get("selected_topic", "—"),
+    score=new_score
+)
 
     # --- Формирование результата ---
     result_msg = ""
