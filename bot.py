@@ -394,7 +394,7 @@ async def main_menu_callback(callback: CallbackQuery):
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
             f"<b>🎯 Уровень:</b> {level}\n"
-            f"<b>⭐ Баллы:</b> {points}\n"
+            f"<b>⭐ Баллы:</b> {round(user['points'], 2)}\n\n"
         )
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     else:
