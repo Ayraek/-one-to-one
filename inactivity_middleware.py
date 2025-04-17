@@ -4,7 +4,7 @@ from aiogram import BaseMiddleware, types, Bot
 from aiogram.fsm.context import FSMContext
 
 class InactivityMiddleware(BaseMiddleware):
-    def __init__(self, timeout_seconds=900):
+    def __init__(self, timeout_seconds=3600):
         super().__init__()
         self.timeout = timeout_seconds  # 900 секунд = 15 минут
 
@@ -21,7 +21,7 @@ class InactivityMiddleware(BaseMiddleware):
                 await state.update_data(last_active=now)
             # Если прошло больше 15 минут
             elif now - last_active > self.timeout:
-                logging.info("[InactivityMiddleware] 15 минут бездействия – очищаем состояние и удаляем сообщения бота.")
+                logging.info("[InactivityMiddleware] 60 минут бездействия – очищаем состояние и удаляем сообщения бота.")
 
                 # Удаляем сообщения бота
                 bot_messages = state_data.get("bot_messages", [])
@@ -49,9 +49,10 @@ class InactivityMiddleware(BaseMiddleware):
                 )
 
                 if isinstance(event, types.Message):
-                    await event.answer("🔄 Прошло больше 15 минут без взаимодействия. История очищена.\nНажмите «Начать обучение» для нового старта.", reply_markup=keyboard)
+                    await event.answer("🔄 Прошёл 1 час без взаимодействия. История очищена.\nНажмите «Начать обучение» для нового старта.", reply_markup=keyboard)
                 elif isinstance(event, types.CallbackQuery):
-                    await event.message.answer("🔄 Прошло больше 15 минут без взаимодействия. История очищена.\nНажмите «Начать обучение» для нового старта.", reply_markup=keyboard)
+                    await event.message.answer("🔄 Прошёл 1 час без взаимодействия. История очищена.\nНажмите «Начать обучение» для нового старта.", reply_markup=keyboard)
+
                 return  # Прерываем дальнейшую обработку события
 
             else:
