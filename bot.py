@@ -230,7 +230,7 @@ async def save_user_answer(user_id: int, question: str, answer: str, grade: str,
     question_time = state_data.get("question_time", time.time())
 
     # Условие подозрительности
-    is_suspicious = len(answer.strip()) < 30 or (time.time() - question_time) < 60
+    is_suspicious = len(answer.strip()) < 30 or (time.time() - question_time) < 120
 
     async with db_pool.acquire() as conn:
         await conn.execute('''
@@ -845,7 +845,13 @@ async def handle_task_answer(message: Message, state: FSMContext):
     if not user:
         await message.answer("⚠️ Пользователь не найден.")
         return
-
+# Проверка на шаблонные GPT-фразы
+    if detect_gpt_phrases(message.text):
+        await message.answer(
+        "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
+        "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
+    )
+        return
     student_name = user["name"]
     logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
     feedback_raw = await evaluate_answer(question, message.text, student_name)
@@ -998,6 +1004,16 @@ async def process_voice_message(message: Message, state: FSMContext):
     text = await transcribe_audio(save_path)
     os.remove(save_path)
     await message.answer(f"📝 Расшифровка: «{text}»\nОцениваю...")
+
+    # Проверка на шаблонные GPT-фразы (после голосовой расшифровки)
+    if detect_gpt_phrases(text):
+        await message.answer(
+        "⚠️ Похоже, что ваш голосовой ответ содержит шаблонные GPT-фразы. "
+        "Попробуйте переформулировать своими словами, чтобы получить более точную и честную оценку.",
+        reply_markup=get_main_menu()
+    )
+        await state.clear()
+        return
 
     # Оценка
     data = await state.get_data()
@@ -1275,6 +1291,16 @@ def format_progress_analytics(user, data):
         f"<i>📌 Обновление аналитики происходит раз в неделю</i>"
     )
 
+def detect_gpt_phrases(text: str) -> bool:
+    suspicious_phrases = re.compile(
+        r"это важный аспект для рассмотрения|данный подход позволяет|"
+        r"таким образом можно охарактеризовать|можно выделить несколько ключевых моментов|"
+        r"рассмотрим подробнее|это свидетельствует о|необходимо подчеркнуть|"
+        r"представляется логичным|в рамках данного контекста|"
+        r"представим ситуацию, при которой",
+        re.IGNORECASE
+    )
+    return bool(suspicious_phrases.search(text))
 
 # --------------------------
 # Запуск бота
