@@ -736,31 +736,43 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(F.text.in_(["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]))
 async def handle_answer_navigation(message: Message, state: FSMContext):
-    logging.info(f"[NAV] Button pressed: {message.text}, state={await state.get_state()}")
     text = message.text
+    state_name = await state.get_state()
+    logging.info(f"[NAV] Button pressed: {text}, state={state_name}")
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
 
+    # 1) Главное меню
     if text == "🏠 Главное меню":
         await state.clear()
         await message.answer("Вы вернулись в главное меню:", reply_markup=get_main_menu())
         return
 
+    # 2) Показать правильный ответ
     if text == "✅ Показать правильный ответ":
         last_q = data.get("last_question")
         last_g = data.get("last_grade")
         if not last_q or not last_g:
-            await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
             await state.clear()
+            await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
             return
         correct = await generate_correct_answer(last_q, last_g)
-        kb = ReplyKeyboardMarkup([[KeyboardButton("➡️ Следующий вопрос")],
-                                  [KeyboardButton("🏠 Главное меню")]],
-                                  resize_keyboard=True, one_time_keyboard=True)
-        await message.answer(f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
-                             parse_mode="HTML", reply_markup=kb)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton("➡️ Следующий вопрос")],
+                [KeyboardButton("🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(
+            f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
         return
 
+    # 3) Следующий вопрос
     if text == "➡️ Следующий вопрос":
         grade = data.get("grade")
         topic = data.get("selected_topic")
@@ -770,12 +782,18 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         new_q = await generate_question(grade, topic, user["name"])
         await state.update_data(question=new_q, last_score=0.0)
         await state.set_state(TaskState.waiting_for_answer)
-        kb = ReplyKeyboardMarkup([
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
                 [KeyboardButton("✍️ Ответить текстом"), KeyboardButton("🎤 Ответить голосом")],
                 [KeyboardButton("❓ Уточнить"), KeyboardButton("🏠 Главное меню")]
-            ], resize_keyboard=True, one_time_keyboard=True)
-        await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_q}",
-                             reply_markup=kb)
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+        await message.answer(
+            f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_q}",
+            reply_markup=kb
+        )
         return
     
 # --------------------------
@@ -821,7 +839,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.set_state(TaskState.waiting_for_clarification)
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
-
 
     # Основная обработка ответа
     grade = data.get("grade")
