@@ -119,11 +119,12 @@ def get_show_answer_menu():
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_admin_menu():
-    keyboard = [
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
-        [InlineKeyboardButton(text="💬 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="📈 Метрики продукта", callback_data="admin_metrics")],
+        [InlineKeyboardButton(text="📨 Рассылка", callback_data="admin_broadcast")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ]
+    ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 # --------------------------
@@ -412,6 +413,40 @@ async def admin_stats_handler(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_broadcast")
 async def admin_broadcast_handler(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text("Функция рассылки скоро будет доступна.", reply_markup=get_admin_menu())
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_metrics")
+async def admin_metrics_handler(callback: CallbackQuery):
+    try:
+        async with db_pool.acquire() as conn:
+            # Среднее количество заданий на пользователя
+            tasks_avg = await conn.fetchval('''
+                SELECT AVG(cnt) FROM (
+                    SELECT COUNT(*) AS cnt FROM answers GROUP BY user_id
+                ) sub
+            ''')
+
+            # Средняя оценка
+            avg_score = await conn.fetchval("SELECT AVG(score) FROM answers")
+
+            # Заглушка для времени — можно будет доработать позже
+            avg_time = "— скоро будет доступно"
+
+            # Ответ
+            text = (
+                "<b>📈 Метрики продукта</b>\n\n"
+                f"🧮 Среднее число заданий на пользователя: {round(tasks_avg or 0, 2)}\n"
+                f"⭐ Средняя оценка за задания: {round(avg_score or 0, 2)}\n"
+                f"⏱️ Среднее время в боте: {avg_time}\n\n"
+                "<i>Метрики собираются на основе пользовательской активности</i>"
+            )
+
+            await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_admin_menu())
+
+    except Exception as e:
+        logging.error(f"Ошибка при получении метрик: {e}")
+        await callback.message.edit_text("❌ Ошибка при получении метрик.", reply_markup=get_admin_menu())
+
     await callback.answer()
 
 @router.callback_query(F.data == "main_menu")
