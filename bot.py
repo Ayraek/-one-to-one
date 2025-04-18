@@ -863,6 +863,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
+    await state.set_state(TaskState.waiting_for_answer)
+
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
