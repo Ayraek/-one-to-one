@@ -1224,7 +1224,9 @@ async def handle_next_question(message: Message, state: FSMContext):
         one_time_keyboard=True
     )
 
-    await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
+    await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=ReplyKeyboardRemove())
+    await message.answer("👇 Жду твой ответ!", reply_markup=kb)
+
 
 @router.message(lambda message: message.text == "🏠 Главное меню")
 async def handle_main_menu(message: Message, state: FSMContext):
