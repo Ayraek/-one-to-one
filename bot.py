@@ -78,6 +78,7 @@ def get_main_menu():
         [InlineKeyboardButton(text="👤 Мой профиль", callback_data="profile")],
         [InlineKeyboardButton(text="📚 Получить задание", callback_data="task")],
         [InlineKeyboardButton(text="📝 Экзамен", callback_data="exam")],
+        [InlineKeyboardButton(text="👨‍🎓 Ученикам Академии", callback_data="learning")],
         [InlineKeyboardButton(text="📰 Новости", callback_data="news")],
         [InlineKeyboardButton(text="📊 Аналитика прогресса", callback_data="progress")]
     ]
@@ -432,6 +433,40 @@ async def main_menu_callback(callback: CallbackQuery):
         await callback.message.edit_text(welcome_text, reply_markup=get_main_menu())
     await callback.answer()
 
+@router.callback_query(F.data == "learning")
+async def learning_entry(callback: CallbackQuery):
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🚀 С 0 до Junior/Middle", callback_data="track_junior_middle")],
+        [InlineKeyboardButton(text="🧠 Senior", callback_data="track_senior")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+    await callback.message.edit_text(
+        "🎓 <b>Выберите программу обучения:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "track_junior_middle")
+async def handle_junior_track(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "🚀 Вы выбрали обучение с 0 до Junior/Middle. Здесь скоро появится программа и задания.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "track_senior")
+async def handle_senior_track(callback: CallbackQuery):
+    await callback.message.edit_text(
+        "🧠 Вы выбрали Senior-трек. Здесь скоро появится программа и задания.",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+    )
+    await callback.answer()
+    
 @router.callback_query(F.data == "news")
 async def news_callback(callback: CallbackQuery):
     text = (
