@@ -213,6 +213,7 @@ async def create_db_pool():
             $$;
         ''')
 
+
 # --------------------------
 # Функции работы с базой данных
 # --------------------------
@@ -775,14 +776,13 @@ async def handle_task_answer(message: Message, state: FSMContext):
         return
 
     if text == "🏠 Главное меню":
-        logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню'")
         user = await get_user_from_db(message.from_user.id)
         if user:
             profile_text = (
                 f"<b>👤 Имя:</b> {user['name']}\n"
                 f"<b>🎂 Возраст:</b> {user['age']}\n"
                 f"<b>🎯 Уровень:</b> {user['level']}\n"
-                f"<b>⭐ Баллы:</b> {user['points']}\n\n"
+                f"<b>⭐ Баллы:</b> {round(user['points'], 2)}\n\n"
                 "Вы в главном меню:"
             )
         else:
@@ -792,62 +792,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # ✅ Показать правильный ответ
-    if text == "✅ Показать правильный ответ":
-        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
-        last_question = data.get("last_question")
-        last_grade = data.get("last_grade")
-
-        if not last_question or not last_grade:
-            await message.answer(
-                "⚠️ Сейчас нет активного задания, для которого можно показать правильный ответ. "
-                "Сначала пройдите задание.",
-                reply_markup=get_main_menu()
-            )
-            await state.clear()
-            return
-
-        correct_answer = await generate_correct_answer(last_question, last_grade)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➡️ Следующий вопрос")],
-                [KeyboardButton(text="🏠 Главное меню")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-        await message.answer("👇 Что делаем дальше?", reply_markup=kb)
-        return
-
-    # ➡️ Следующий вопрос
-    if text == "➡️ Следующий вопрос":
-        logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос'")
-        grade = data.get("grade")
-        topic = data.get("selected_topic")
-        if not grade or not topic:
-            await message.answer("⚠️ Ошибка: не найдены нужные данные.")
-            return
-        user = await get_user_from_db(message.from_user.id)
-        if not user:
-            await message.answer("⚠️ Пользователь не найден.")
-            return
-        name = user["name"]
-        new_question = await generate_question(grade, topic, name)
-        logging.info(f"[DEBUG] Сгенерирован новый вопрос: {new_question}")
-        await state.update_data(question=new_question, last_score=0)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
-                [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
-        return
-
-    # 📝 Обработка текстового ответа
+    # Основная обработка ответа
     grade = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
@@ -859,16 +804,19 @@ async def handle_task_answer(message: Message, state: FSMContext):
     if not user:
         await message.answer("⚠️ Пользователь не найден.")
         return
-# Проверка на шаблонные GPT-фразы
-    if detect_gpt_phrases(message.text):
+
+    # Проверка на GPT-шаблонные фразы
+    if detect_gpt_phrases(text):
         await message.answer(
-        "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
-        "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
-    )
+            "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
+            "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
+        )
         return
+
+    # Оценка ответа
     student_name = user["name"]
     logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
-    feedback_raw = await evaluate_answer(question, message.text, student_name)
+    feedback_raw = await evaluate_answer(question, text, student_name)
     logging.info(f"[DEBUG] RAW FEEDBACK:\n{feedback_raw}")
 
     if not feedback_raw or "Ошибка" in feedback_raw:
@@ -879,8 +827,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
+
     if match:
         criteria_block = match.group(1).strip()
         try:
@@ -893,25 +843,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    if new_score > last_score:
-        diff = new_score - last_score
-        await update_user_points(message.from_user.id, diff)
-        await update_level(message.from_user.id)
-        await state.update_data(last_score=new_score)
-        await save_user_answer(
-    user_id=message.from_user.id,
-    question=question,
-    answer=message.text,
-    grade=grade,
-    topic=data.get("selected_topic", "—"),
-    score=new_score
-)
-
+    # Собираем ответ
     result_msg = ""
     if criteria_block:
-        result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
-    result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
+        result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
     kb = ReplyKeyboardMarkup(
         keyboard=[
@@ -926,7 +863,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
     await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
-
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
