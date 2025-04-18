@@ -168,9 +168,9 @@ async def create_db_pool():
             )
         ''')
 
-        # 👇 Вот это добавляешь СРАЗУ после users
+                # 👇 Таблица answers
         await conn.execute('''
-             CREATE TABLE IF NOT EXISTS answers (
+            CREATE TABLE IF NOT EXISTS answers (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
                 question TEXT,
@@ -183,6 +183,7 @@ async def create_db_pool():
             )
         ''')
 
+        # 👇 Таблица analytics
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS analytics (
                 user_id BIGINT PRIMARY KEY,
@@ -198,6 +199,19 @@ async def create_db_pool():
             )
         ''')
 
+        # ✅ Проверка и добавление поля is_suspicious
+        await conn.execute('''
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM information_schema.columns 
+                    WHERE table_name='answers' AND column_name='is_suspicious'
+                ) THEN
+                    ALTER TABLE answers ADD COLUMN is_suspicious BOOLEAN DEFAULT FALSE;
+                END IF;
+            END
+            $$;
+        ''')
 
 # --------------------------
 # Функции работы с базой данных
