@@ -1034,7 +1034,6 @@ async def process_voice_message(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
