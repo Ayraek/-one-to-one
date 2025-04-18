@@ -775,22 +775,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=types.ReplyKeyboardRemove())
         return
 
-    if text == "🏠 Главное меню":
-        user = await get_user_from_db(message.from_user.id)
-        if user:
-            profile_text = (
-                f"<b>👤 Имя:</b> {user['name']}\n"
-                f"<b>🎂 Возраст:</b> {user['age']}\n"
-                f"<b>🎯 Уровень:</b> {user['level']}\n"
-                f"<b>⭐ Баллы:</b> {round(user['points'], 2)}\n\n"
-                "Вы в главном меню:"
-            )
-        else:
-            profile_text = "Пользователь не найден. Вы в главном меню."
-
-        await message.answer(profile_text, parse_mode="HTML", reply_markup=get_main_menu())
-        await state.clear()
-        return
 
     # Основная обработка ответа
     grade = data.get("grade")
@@ -869,71 +853,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
     text = message.text.strip() if message.text else ""
-
-    # Главное меню
-    if text == "🏠 Главное меню":
-        logging.info("[DEBUG] Пользователь нажал '🏠 Главное меню' в голосовом режиме")
-        user = await get_user_from_db(message.from_user.id)
-        profile_text = (
-            f"<b>👤 Имя:</b> {user['name'] if user else '—'}\n"
-            f"<b>🎂 Возраст:</b> {user['age'] if user else '—'}\n"
-            f"<b>🎯 Уровень:</b> {user['level'] if user else '—'}\n"
-            f"<b>⭐ Баллы:</b> {user['points'] if user else '—'}\n\n"
-            "Вы в главном меню:"
-        )
-        await message.answer(profile_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-        await message.answer("👇 Главное меню", reply_markup=get_main_menu())
-        await state.clear()
-        return
-
-    # Следующий вопрос
-    if text == "➡️ Следующий вопрос":
-        logging.info("[DEBUG] Пользователь нажал '➡️ Следующий вопрос' в голосовом режиме")
-        data = await state.get_data()
-        grade = data.get("grade")
-        topic = data.get("selected_topic")
-        if not grade or not topic:
-            await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
-            return
-        user = await get_user_from_db(message.from_user.id)
-        if not user:
-            await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
-            return
-        new_question = await generate_question(grade, topic, user["name"])
-        await state.set_state(TaskState.waiting_for_answer)
-        await state.update_data(question=new_question, last_score=0)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
-                [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
-        return
-
-    # Показать правильный ответ
-    if text == "✅ Показать правильный ответ":
-        logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
-        data = await state.get_data()
-        last_question = data.get("last_question")
-        last_grade = data.get("last_grade")
-        if not last_question or not last_grade:
-            await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
-            await state.clear()
-            return
-        correct_answer = await generate_correct_answer(last_question, last_grade)
-        kb = ReplyKeyboardMarkup(
-            keyboard=[
-                [KeyboardButton(text="➡️ Следующий вопрос")],
-                [KeyboardButton(text="🏠 Главное меню")]
-            ],
-            resize_keyboard=True,
-            one_time_keyboard=True
-        )
-        await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
-        return
 
     # Проверка на наличие голосового сообщения
     if not message.voice:
@@ -1252,6 +1171,79 @@ def detect_gpt_phrases(text: str) -> bool:
         re.IGNORECASE
     )
     return bool(suspicious_phrases.search(text))
+
+@router.message(lambda message: message.text == "✅ Показать правильный ответ")
+async def handle_show_correct_answer(message: Message, state: FSMContext):
+    logging.info("[DEBUG] Пользователь нажал '✅ Показать правильный ответ'")
+    data = await state.get_data()
+    last_question = data.get("last_question")
+    last_grade = data.get("last_grade")
+
+    if not last_question or not last_grade:
+        await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
+        await state.clear()
+        return
+
+    correct_answer = await generate_correct_answer(last_question, last_grade)
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer(f"✅ Эталонный ответ уровня {last_grade}:\n\n{correct_answer}", parse_mode="HTML", reply_markup=kb)
+
+@router.message(lambda message: message.text == "➡️ Следующий вопрос")
+async def handle_next_question(message: Message, state: FSMContext):
+    data = await state.get_data()
+    grade = data.get("grade")
+    topic = data.get("selected_topic")
+
+    if not grade or not topic:
+        await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
+        return
+
+    user = await get_user_from_db(message.from_user.id)
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
+        return
+
+    name = user["name"]
+    new_question = await generate_question(grade, topic, name)
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(question=new_question, last_score=0)
+
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+            [KeyboardButton(text="❓ Уточнить"), KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_question}", reply_markup=kb)
+
+@router.message(lambda message: message.text == "🏠 Главное меню")
+async def handle_main_menu(message: Message, state: FSMContext):
+    user = await get_user_from_db(message.from_user.id)
+
+    if user:
+        profile_text = (
+            f"<b>👤 Имя:</b> {user['name']}\n"
+            f"<b>🎂 Возраст:</b> {user['age']}\n"
+            f"<b>🎯 Уровень:</b> {user['level']}\n"
+            f"<b>⭐ Баллы:</b> {round(user['points'], 2)}\n\n"
+            "Вы в главном меню:"
+        )
+    else:
+        profile_text = "Пользователь не найден. Вы в главном меню."
+
+    await message.answer(profile_text, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
+    await message.answer("👇 Главное меню", reply_markup=get_main_menu())
+    await state.clear()
 
 # --------------------------
 # Запуск бота
