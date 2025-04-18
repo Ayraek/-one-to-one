@@ -170,7 +170,7 @@ async def create_db_pool():
 
         # 👇 Вот это добавляешь СРАЗУ после users
         await conn.execute('''
-            CREATE TABLE IF NOT EXISTS answers (
+             CREATE TABLE IF NOT EXISTS answers (
                 id SERIAL PRIMARY KEY,
                 user_id BIGINT,
                 question TEXT,
@@ -178,6 +178,7 @@ async def create_db_pool():
                 grade TEXT,
                 topic TEXT,
                 score REAL,
+                is_suspicious BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP DEFAULT now()
             )
         ''')
@@ -221,12 +222,21 @@ async def update_user_points(user_id: int, additional_points: float):
             additional_points, user_id
         )
 
-async def save_user_answer(user_id: int, question: str, answer: str, grade: str, topic: str, score: float):
+import time
+
+async def save_user_answer(user_id: int, question: str, answer: str, grade: str, topic: str, score: float, state: FSMContext = None):
+    # Получаем данные из FSMContext, если передан
+    state_data = await state.get_data() if state else {}
+    question_time = state_data.get("question_time", time.time())
+
+    # Условие подозрительности
+    is_suspicious = len(answer.strip()) < 30 or (time.time() - question_time) < 60
+
     async with db_pool.acquire() as conn:
         await conn.execute('''
-            INSERT INTO answers (user_id, question, answer, grade, topic, score)
-            VALUES ($1, $2, $3, $4, $5, $6)
-        ''', user_id, question, answer, grade, topic, score)
+            INSERT INTO answers (user_id, question, answer, grade, topic, score, is_suspicious)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ''', user_id, question, answer, grade, topic, score, is_suspicious)
 
 async def update_level(user_id: int):
     user = await get_user_from_db(user_id)
@@ -462,6 +472,7 @@ async def admin_metrics_handler(callback: CallbackQuery):
         await callback.message.edit_text("❌ Ошибка при получении метрик.", reply_markup=get_admin_menu())
 
     await callback.answer()
+
 
 @router.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
