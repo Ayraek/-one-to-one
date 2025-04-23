@@ -12,7 +12,8 @@ from openai import OpenAI
 
 from aiogram import Bot, Dispatcher, Router, F, types
 from aiogram.types import (
-    Message, CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup,
+    Message, CallbackQuery,
+    InlineKeyboardButton, InlineKeyboardMarkup,
     ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 )
 from aiogram.fsm.context import FSMContext
@@ -109,13 +110,6 @@ def get_exam_menu():
 
 def get_news_menu():
     keyboard = [[InlineKeyboardButton(text="Вернуться в главное меню", callback_data="main_menu")]]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard)
-
-def get_show_answer_menu():
-    keyboard = [
-        [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="next_question")],
-        [InlineKeyboardButton(text="🏠 Вернуться в главное меню", callback_data="main_menu")]
-    ]
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_admin_menu():
@@ -1038,16 +1032,6 @@ async def process_voice_message(message: Message, state: FSMContext):
     await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer) 
-
-# --------------------------
-# Дополнительный callback для "next_question"
-# --------------------------
-
-@router.callback_query(F.data == "next_question")
-async def next_question_handler(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
-    await callback.message.edit_text("Выберите грейд, для которого хотите получить задание:", reply_markup=get_grades_menu())
-    await callback.answer()
 
 # --------------------------
 # Функции для работы с OpenAI
