@@ -775,8 +775,13 @@ async def process_clarification(message: Message, state: FSMContext):
     )
     await state.set_state(TaskState.waiting_for_answer)
 
-@router.message(lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"])
+@router.message(
+    TaskState.waiting_for_answer,
+    lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
+)
 async def handle_answer_navigation(message: Message, state: FSMContext):
+    ...
+
     text = message.text
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
@@ -819,7 +824,10 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
 # Общий обработчик для TaskState.waiting_for_answer
 # --------------------------
 
-@router.message(TaskState.waiting_for_answer)
+@router.message(
+    TaskState.waiting_for_answer,
+    lambda m: m.text not in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
+)
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
     
