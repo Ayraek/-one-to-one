@@ -698,6 +698,12 @@ async def cb_main(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     await call.answer()
 
+@router.callback_query(F.data == "start_answer")
+async def handle_start_answer_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=ReplyKeyboardRemove())
+    await state.set_state(TaskState.waiting_for_answer)
+    await callback.answer()
+
 # --------------------------
 # Поведение при уточнении
 # --------------------------
