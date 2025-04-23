@@ -662,9 +662,9 @@ async def cb_show(call: CallbackQuery, state: FSMContext):
     if not q or not g:
         return await call.answer("Нет активного задания", show_alert=True)
     correct = await generate_correct_answer(q, g)
-    kb = InlineKeyboardMarkup([
-       [InlineKeyboardButton("➡️ Следующий вопрос", callback_data="nav_next")],
-       [InlineKeyboardButton("🏠 Главное меню",       callback_data="nav_main")],
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+       [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
+       [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
     ])
 
     await call.message.edit_text(f"✅ Эталонный ответ:\n\n{correct}", parse_mode="HTML", reply_markup=kb)
@@ -679,10 +679,10 @@ async def cb_next(call: CallbackQuery, state: FSMContext):
         return await call.answer("Нет данных для нового вопроса", show_alert=True)
     new_q = await generate_question(grade, topic, user["name"])
     await state.update_data(question=new_q, last_score=0.0)
-    kb = InlineKeyboardMarkup([
-       [InlineKeyboardButton("✍️ Ответить текстом", callback_data="start_answer")],
-       [InlineKeyboardButton("🎤 Ответить голосом", callback_data="start_voice")],
-       [InlineKeyboardButton("🏠 Главное меню",       callback_data="nav_main")],
+    kb = InlineKeyboardMarkup(inline_keyboard=[
+      [InlineKeyboardButton(text="✍️ Ответить текстом", callback_data="start_answer")],
+      [InlineKeyboardButton(text="🎤 Ответить голосом", callback_data="start_voice")],
+      [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
     ])
 
     await call.message.edit_text(f"Новый вопрос:\n\n{new_q}", reply_markup=kb)
