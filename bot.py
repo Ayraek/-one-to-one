@@ -1015,16 +1015,16 @@ async def process_voice_message(message: Message, state: FSMContext):
     if new_score > last_score:
         await update_user_points(message.from_user.id, new_score - last_score)
         await update_level(message.from_user.id)
-        await state.update_data(last_score=new_score)
         await save_user_answer(
-           user_id=message.from_user.id,
-           question=question,
-           answer=text,
-           grade=grade,
-           topic=data.get("selected_topic", "—"),
-           score=new_score,
-           state=state  # обязательно, чтобы поймать время ответа
+          user_id=message.from_user.id,
+          question=question,
+          answer=text,
+          grade=grade,
+          topic=data.get("selected_topic", "—"),
+          score=new_score,
+          state=state
         )
+        await state.update_data(last_score=new_score)
 
     result_msg = ""
     if criteria_block:
