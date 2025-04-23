@@ -661,6 +661,47 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+@router.callback_query(F.data=="nav_show")
+async def cb_show(call: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    q, g = data.get("last_question"), data.get("last_grade")
+    if not q or not g:
+        return await call.answer("Нет активного задания", show_alert=True)
+    correct = await generate_correct_answer(q, g)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Следующий вопрос", callback_data="nav_next")],
+        [InlineKeyboardButton("🏠 Главное меню",       callback_data="nav_main")],
+    ])
+    await call.message.edit_text(f"✅ Эталонный ответ:\n\n{correct}", parse_mode="HTML", reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data=="nav_next")
+async def cb_next(call: CallbackQuery, state: FSMContext):
+    data  = await state.get_data()
+    grade = data.get("grade"); topic=data.get("selected_topic")
+    user  = await get_user_from_db(call.from_user.id)
+    if not grade or not topic or not user:
+        return await call.answer("Нет данных для нового вопроса", show_alert=True)
+    new_q = await generate_question(grade, topic, user["name"])
+    await state.update_data(question=new_q, last_score=0.0)
+    kb = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✍️ Ответить текстом", callback_data="start_answer")],
+        [InlineKeyboardButton("🎤 Ответить голосом", callback_data="start_voice")],
+        [InlineKeyboardButton("🏠 Главное меню",       callback_data="nav_main")],
+    ])
+    await call.message.edit_text(f"Новый вопрос:\n\n{new_q}", reply_markup=kb)
+    await call.answer()
+
+@router.callback_query(F.data=="nav_main")
+async def cb_main(call: CallbackQuery, state: FSMContext):
+    await state.clear()
+    user = await get_user_from_db(call.from_user.id)
+    text = welcome_text if not user else (
+        f"<b>👤 {user['name']}</b>\n🎯 {user['level']} | ⭐ {round(user['points'],2)}"
+    )
+    await call.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
+    await call.answer()
+
 # --------------------------
 # Поведение при уточнении
 # --------------------------
@@ -877,18 +918,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="✅ Показать правильный ответ")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-
-    await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("👇 Что делаем дальше?", reply_markup=kb)
+    inline_nav = InlineKeyboardMarkup(inline_keyboard=[
+     [InlineKeyboardButton("➡️ Следующий вопрос", callback_data="nav_next")],
+     [InlineKeyboardButton("✅ Показать правильный ответ", callback_data="nav_show")],
+     [InlineKeyboardButton("🏠 Главное меню", callback_data="nav_main")],
+])
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
