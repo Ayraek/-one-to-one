@@ -938,6 +938,20 @@ async def handle_task_answer(message: Message, state: FSMContext):
     [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
 ])
+    if new_score > last_score:
+        await update_user_points(message.from_user.id, new_score - last_score)
+        await update_level(message.from_user.id)
+        await save_user_answer(
+            user_id=message.from_user.id,
+            question=question,
+            answer=text,
+            grade=grade,
+            topic=data.get("selected_topic", "—"),
+            score=new_score,
+            state=state
+        )
+        await state.update_data(last_score=new_score)
+
     await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
