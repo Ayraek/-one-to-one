@@ -921,9 +921,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
     inline_nav = InlineKeyboardMarkup(inline_keyboard=[
-     [InlineKeyboardButton("➡️ Следующий вопрос", callback_data="nav_next")],
-     [InlineKeyboardButton("✅ Показать правильный ответ", callback_data="nav_show")],
-     [InlineKeyboardButton("🏠 Главное меню", callback_data="nav_main")],
+    [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
+    [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
+    [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
 ])
     await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
     await state.update_data(last_question=question, last_grade=grade)
