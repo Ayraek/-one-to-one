@@ -678,7 +678,12 @@ async def cb_next(call: CallbackQuery, state: FSMContext):
     if not grade or not topic or not user:
         return await call.answer("Нет данных для нового вопроса", show_alert=True)
     new_q = await generate_question(grade, topic, user["name"])
-    await state.update_data(question=new_q, last_score=0.0)
+    await state.update_data(
+    question=new_q,
+    last_score=0.0,
+    grade=grade,
+    selected_topic=topic
+)
     kb = InlineKeyboardMarkup(inline_keyboard=[
       [InlineKeyboardButton(text="✍️ Ответить текстом", callback_data="start_answer")],
       [InlineKeyboardButton(text="🎤 Ответить голосом", callback_data="start_voice")],
@@ -1012,12 +1017,13 @@ async def process_voice_message(message: Message, state: FSMContext):
         await update_level(message.from_user.id)
         await state.update_data(last_score=new_score)
         await save_user_answer(
-            user_id=message.from_user.id,
-            question=question,
-            answer=text,
-            grade=grade,
-            topic=data.get("selected_topic", "—"),
-            score=new_score
+           user_id=message.from_user.id,
+           question=question,
+           answer=text,
+           grade=grade,
+           topic=data.get("selected_topic", "—"),
+           score=new_score,
+           state=state  # обязательно, чтобы поймать время ответа
         )
 
     result_msg = ""
