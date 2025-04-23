@@ -121,7 +121,7 @@ def get_admin_menu():
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
-# --------------------------
+# -------------------
 # Состояния
 # --------------------------
 
