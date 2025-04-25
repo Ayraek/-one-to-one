@@ -56,6 +56,16 @@ logging.basicConfig(level=logging.INFO)
 
 LEVELS = ["Junior", "Middle", "Senior", "Head of Product", "CPO", "CEO"]
 
+ACADEMY_TOPICS = [
+    ("research", "📚 Исследования"),
+    ("mvp", "🛠 Продукт и MVP"),
+    ("marketing", "📈 Маркетинг IT продуктов"),
+    ("team", "👨‍💻 Управление командой"),
+    ("analytics", "📊 Продуктовая аналитика"),
+    ("strategy", "🏹 Стратегия"),
+    ("softskills", "🤝 Soft Skills")
+]
+
 welcome_text = (
     "💡 Добро пожаловать в \"One to One Booster bot\" — вашего личного ассистента для прокачки навыков в продакт-менеджменте!"
 )
@@ -117,6 +127,7 @@ def get_admin_menu():
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📈 Метрики продукта", callback_data="admin_metrics")],
         [InlineKeyboardButton(text="📨 Рассылка", callback_data="admin_broadcast")],
+        [InlineKeyboardButton(text="🎓 Добавить ученика Академии", callback_data="admin_add_academy")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
@@ -132,7 +143,7 @@ class RegisterState(StatesGroup):
 class TaskState(StatesGroup):
     waiting_for_answer = State()
     waiting_for_clarification = State()
-    waiting_for_voice = State()  # новое состояние для голосового ответа
+    waiting_for_voice = State()
 # --------------------------
 # Подключение к PostgreSQL
 # --------------------------
@@ -160,6 +171,13 @@ async def create_db_pool():
                 level TEXT,
                 points REAL
             )
+        ''')
+
+        await conn.execute('''
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS is_academy_student BOOLEAN DEFAULT FALSE;
+        ''')
+        await conn.execute('''
+            ALTER TABLE users ADD COLUMN IF NOT EXISTS academy_points REAL DEFAULT 0.0;
         ''')
 
                 # 👇 Таблица answers
@@ -206,8 +224,15 @@ async def create_db_pool():
             END
             $$;
         ''')
-
-
+   
+        await conn.execute('''
+            CREATE TABLE IF NOT EXISTS academy_progress (
+                user_id BIGINT,
+                topic TEXT,
+                points REAL DEFAULT 0.0,
+                PRIMARY KEY (user_id, topic)
+            )
+        ''')
 # --------------------------
 # Функции работы с базой данных
 # --------------------------
@@ -276,6 +301,24 @@ async def get_user_rank(user_id: int) -> int:
             return ids.index(user_id) + 1  # позиция +1, т.к. с нуля
         return -1  # если вдруг не нашли
 
+# Получить текущие баллы по теме
+async def get_academy_topic_points(user_id: int, topic: str) -> float:
+    async with db_pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT points FROM academy_progress WHERE user_id = $1 AND topic = $2",
+            user_id, topic
+        )
+        return row["points"] if row else 0.0
+
+# Добавить баллы
+async def update_academy_topic_points(user_id: int, topic: str, additional: float):
+    async with db_pool.acquire() as conn:
+        await conn.execute('''
+            INSERT INTO academy_progress (user_id, topic, points)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (user_id, topic) DO UPDATE
+            SET points = academy_progress.points + EXCLUDED.points
+        ''', user_id, topic, additional)
 # --------------------------
 # Обработчики коллбэков и команд
 # --------------------------
@@ -288,6 +331,8 @@ async def show_profile(callback: CallbackQuery):
         age = user["age"]
         level = user["level"]
         points = user["points"]
+        academy_points = user.get("academy_points", 0.0)
+        is_academy = user.get("is_academy_student", False)
         rank = await get_user_rank(callback.from_user.id)
 
         # Получаем последние 3 ответа
@@ -304,12 +349,20 @@ async def show_profile(callback: CallbackQuery):
             f"• {r['topic']} ({r['grade']}) — {round(r['score'], 2)}" for r in rows
         ]) if rows else "— пока нет"
 
+        # Основной текст профиля
         text = (
             f"<b>👤 Имя:</b> {name}\n"
             f"<b>🎂 Возраст:</b> {age}\n"
             f"<b>🎯 Уровень:</b> {level}\n"
-            f"<b>⭐ Баллы:</b> {round(points, 2)}\n\n"
-            f"<b>🏆 Рейтинг:</b> {rank}-е место\n\n"
+            f"<b>⭐ Общий балл:</b> {round(points, 2)}\n"
+        )
+
+        # Добавляем Академию, если применимо
+        if is_academy:
+            text += f"<b>🎓 Баллы Академии:</b> {round(academy_points, 2)}\n"
+
+        text += (
+            f"\n<b>🏆 Рейтинг:</b> {rank}-е место\n\n"
             f"<b>🕘 Последние ответы:</b>\n{history_lines}"
         )
 
@@ -482,6 +535,11 @@ async def admin_metrics_handler(callback: CallbackQuery):
 
     await callback.answer()
 
+@router.callback_query(F.data == "admin_add_academy")
+async def add_academy_student_start(callback: CallbackQuery, state: FSMContext):
+    await callback.message.edit_text("✍️ Введите ID пользователя, которого нужно сделать учеником Академии:")
+    await state.set_state("waiting_for_student_id")
+    await callback.answer()
 
 @router.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: CallbackQuery):
@@ -518,23 +576,92 @@ async def learning_entry(callback: CallbackQuery):
 
 @router.callback_query(F.data == "track_junior_middle")
 async def handle_junior_track(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "🚀 Вы выбрали обучение с 0 до Junior/Middle. Здесь скоро появится программа и задания.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not user or not user["is_academy_student"]:
+        await callback.message.edit_text(
+            "🚫 Доступ только для учеников Академии One to One!\n\n"
+            "За подробностями пишите сюда: [@apyat](https://t.me/apyat)",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        await callback.answer()
+        return
+    # если есть доступ
+    await show_academy_topics(callback)
+
+@router.callback_query(F.data.startswith("academy_topic_"))
+async def handle_academy_topic(callback: CallbackQuery, state: FSMContext):
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not user or not user["is_academy_student"]:
+        await callback.message.edit_text(
+            "🚫 Доступ только для учеников Академии One to One!\n\n"
+            "За подробностями пишите сюда: [@apyat](https://t.me/apyat)",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        await callback.answer()
+        return
+
+    # Выделяем тему из callback_data
+    topic_key = callback.data.replace("academy_topic_", "").strip()
+
+    topics_map = {
+        "research": "Исследования",
+        "mvp": "Продукт и MVP",
+        "marketing": "Маркетинг IT продуктов",
+        "team": "Управление командой",
+        "analytics": "Продуктовая аналитика",
+        "strategy": "Стратегия",
+        "softskills": "Soft Skills"
+    }
+
+    topic_name = topics_map.get(topic_key, "—")
+
+    question = await generate_academy_question(topic_name, user["name"])
+
+    await state.set_state(TaskState.waiting_for_answer)
+    await state.update_data(
+        question=question,
+        grade=user["level"],
+        selected_topic=topic_name,
+        last_score=0.0,
+        is_academy_task=True  # 🧠 ВАЖНО! Помечаем, что это задача Академии
     )
+
+    keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+
+    await callback.message.answer(
+        f"📝 Задание по теме «{topic_name}»:\n\n{question}\n\nЧто хотите сделать?",
+        reply_markup=keyboard
+    )
+
     await callback.answer()
 
 @router.callback_query(F.data == "track_senior")
 async def handle_senior_track(callback: CallbackQuery):
-    await callback.message.edit_text(
-        "🧠 Вы выбрали Senior-трек. Здесь скоро появится программа и задания.",
-        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-    )
-    await callback.answer()
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not user or not user["is_academy_student"]:
+        await callback.message.edit_text(
+            "🚫 Доступ только для учеников Академии One to One!\n\n"
+            "За подробностями пишите сюда: [@apyat](https://t.me/apyat)",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        await callback.answer()
+        return
+
+    # Если доступ есть — показываем темы
+    await show_academy_topics(callback)
 
 @router.callback_query(F.data == "news")
 async def news_callback(callback: CallbackQuery):
@@ -581,6 +708,45 @@ async def show_progress_analytics(callback: CallbackQuery):
     await callback.message.edit_text(text, parse_mode="HTML", reply_markup=get_main_menu())
     await callback.answer()
 
+
+@router.message(F.text.regexp(r"^\d+$"), state="waiting_for_student_id")
+async def confirm_academy_student(message: Message, state: FSMContext):
+    user_id = int(message.text.strip())
+    async with db_pool.acquire() as conn:
+        await conn.execute("UPDATE users SET is_academy_student = TRUE WHERE id = $1", user_id)
+    await message.answer(f"✅ Пользователь {user_id} добавлен в Академию!", reply_markup=get_admin_menu())
+    await state.clear()
+
+async def show_academy_topics(callback: CallbackQuery):
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not user or not user["is_academy_student"]:
+        await callback.message.edit_text(
+            "🚫 Доступ только для учеников Академии One to One!\n\n"
+            "За подробностями пишите сюда: [@apyat](https://t.me/apyat)",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        await callback.answer()
+        return
+
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📚 Исследования", callback_data="academy_topic_research")],
+        [InlineKeyboardButton(text="🛠 Продукт и MVP", callback_data="academy_topic_mvp")],
+        [InlineKeyboardButton(text="📈 Маркетинг IT продуктов", callback_data="academy_topic_marketing")],
+        [InlineKeyboardButton(text="👨‍💻 Управление командой", callback_data="academy_topic_team")],
+        [InlineKeyboardButton(text="📊 Продуктовая аналитика", callback_data="academy_topic_analytics")],
+        [InlineKeyboardButton(text="🏹 Стратегия", callback_data="academy_topic_strategy")],
+        [InlineKeyboardButton(text="🤝 Soft Skills", callback_data="academy_topic_softskills")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+
+    await callback.message.edit_text(
+        "🔍 <b>Выберите тему для обучения:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+    await callback.answer()
 # --------------------------
 # Получение задания: выбор грейда и темы
 # --------------------------
@@ -939,7 +1105,11 @@ async def handle_task_answer(message: Message, state: FSMContext):
     [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
 ])
     if new_score > last_score:
-        await update_user_points(message.from_user.id, new_score - last_score)
+        if data.get("is_academy_task"):
+            await update_academy_points(message.from_user.id, new_score - last_score)
+        else:
+            await update_user_points(message.from_user.id, new_score - last_score)
+    
         await update_level(message.from_user.id)
         await save_user_answer(
             user_id=message.from_user.id,
@@ -952,10 +1122,17 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
+    if data.get("is_academy_task"):
+        await message.answer(
+            "✅ Отличная работа над заданием Академии!\n\n"
+            "Выберите следующую тему или вернитесь в главное меню:",
+            reply_markup=await build_academy_topics_menu()
+        )
+    else:
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
+
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
-
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
@@ -1027,16 +1204,20 @@ async def process_voice_message(message: Message, state: FSMContext):
         feedback_text = feedback_raw.strip()
 
     if new_score > last_score:
-        await update_user_points(message.from_user.id, new_score - last_score)
+        if data.get("is_academy_task"):
+            await update_academy_points(message.from_user.id, new_score - last_score)
+        else:
+            await update_user_points(message.from_user.id, new_score - last_score)
+
         await update_level(message.from_user.id)
         await save_user_answer(
-          user_id=message.from_user.id,
-          question=question,
-          answer=text,
-          grade=grade,
-          topic=data.get("selected_topic", "—"),
-          score=new_score,
-          state=state
+            user_id=message.from_user.id,
+            question=question,
+            answer=text,
+            grade=grade,
+            topic=data.get("selected_topic", "—"),
+            score=new_score,
+            state=state
         )
         await state.update_data(last_score=new_score)
 
@@ -1106,6 +1287,31 @@ async def generate_question(grade: str, topic: str, name: str) -> str:
     except Exception as e:
         logging.error(f"Ошибка генерации вопроса: {e}")
         return "❌ Ошибка генерации вопроса."
+
+async def generate_academy_question(topic: str, name: str) -> str:
+    # 👇 твоя новая функция для Академии
+    prompt = (
+        f"Сгенерируй задание для ученика Академии по теме: {topic}. "
+        ...
+    )
+
+    try:
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": (
+                    "Ты преподаватель Академии. Генерируешь понятные, реалистичные задания по указанной теме, без лишних приветствий."
+                )},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=400,
+            temperature=0.6
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        logging.error(f"Ошибка генерации задания Академии: {e}")
+        return "❌ Ошибка генерации задания."
 
 async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
     prompt = (
