@@ -22,7 +22,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
-
+from aiogram.filters import StateFilter
 print("=== Все импорты прошли успешно ===")
 
 # --------------------------
@@ -713,7 +713,7 @@ async def show_progress_analytics(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.message(F.text.regexp(r"^\d+$"), state="waiting_for_student_id")
+@router.message(StateFilter("waiting_for_student_id"), F.text.regexp(r"^\d+$"))
 async def confirm_academy_student(message: Message, state: FSMContext):
     user_id = int(message.text.strip())
     async with db_pool.acquire() as conn:
