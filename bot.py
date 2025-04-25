@@ -1,6 +1,8 @@
+print("=== Бот стартует ===")
 import os
 import re
 import logging
+logging.basicConfig(level=logging.DEBUG)
 import asyncpg
 import asyncio
 from urllib.parse import urlparse
@@ -20,6 +22,8 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
+
+print("=== Все импорты прошли успешно ===")
 
 # --------------------------
 # Загрузка переменных окружения
@@ -1289,10 +1293,11 @@ async def generate_question(grade: str, topic: str, name: str) -> str:
         return "❌ Ошибка генерации вопроса."
 
 async def generate_academy_question(topic: str, name: str) -> str:
-    # 👇 твоя новая функция для Академии
     prompt = (
         f"Сгенерируй задание для ученика Академии по теме: {topic}. "
-        ...
+        f"Уровень сложности: Junior или Middle. "
+        f"Формулируй естественно, как человек, без приветствий. "
+        f"Имя кандидата: {name}. Максимум 800 символов."
     )
 
     try:
@@ -1497,4 +1502,5 @@ async def on_startup():
     await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
+    print("=== Запускаем бота ===")
     asyncio.run(on_startup())
