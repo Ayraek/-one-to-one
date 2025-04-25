@@ -713,12 +713,23 @@ async def show_progress_analytics(callback: CallbackQuery):
     await callback.answer()
 
 
-@router.message(StateFilter("waiting_for_student_id"), F.text.regexp(r"^\d+$"))
+@router.message(StateFilter("waiting_for_student_id"))
 async def confirm_academy_student(message: Message, state: FSMContext):
-    user_id = int(message.text.strip())
+    username = message.text.strip().lstrip('@')  # Убираем @ если есть
     async with db_pool.acquire() as conn:
-        await conn.execute("UPDATE users SET is_academy_student = TRUE WHERE id = $1", user_id)
-    await message.answer(f"✅ Пользователь {user_id} добавлен в Академию!", reply_markup=get_admin_menu())
+        user = await conn.fetchrow(
+            "SELECT id FROM users WHERE username = $1", username
+        )
+        if not user:
+            await message.answer("❌ Пользователь с таким username не найден.")
+            await state.clear()
+            return
+        
+        await conn.execute(
+            "UPDATE users SET is_academy_student = TRUE WHERE id = $1",
+            user["id"]
+        )
+    await message.answer(f"✅ Пользователь @{username} добавлен в Академию!", reply_markup=get_admin_menu())
     await state.clear()
 
 async def show_academy_topics(callback: CallbackQuery):
