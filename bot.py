@@ -1079,6 +1079,7 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
+    # Проверка текущего состояния
     current_state = await state.get_state()
     if current_state != TaskState.waiting_for_answer.state:
         await message.answer(
@@ -1088,17 +1089,17 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # Обработка спец-кнопок
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
         await message.answer(
             "✏️ Напишите, пожалуйста, свой ответ текстом.",
             reply_markup=ReplyKeyboardRemove()
         )
-        # Остаёмся в состоянии ожидания текстового ответа
         return
 
     if text == "🎤 Ответить голосом":
         await message.answer(
-            "🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.",
+            "🎤 Пожалуйста, отправьте голосовое сообщение.",
             reply_markup=ReplyKeyboardRemove()
         )
         await state.set_state(TaskState.waiting_for_voice)
@@ -1111,6 +1112,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
             reply_markup=ReplyKeyboardRemove()
         )
         return
+
+    await process_real_student_answer(message, state)
 
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
