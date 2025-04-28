@@ -1331,7 +1331,6 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Ошибка: не найдены данные задания.")
         return
 
-    # Проверяем текст на шаблонность
     if detect_gpt_phrases(text):
         await message.answer(
             "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
@@ -1339,7 +1338,6 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         )
         return
 
-    # Оцениваем ответ через OpenAI
     feedback_raw = await evaluate_answer(question, text, user["name"])
 
     if not feedback_raw:
@@ -1362,27 +1360,24 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Формируем сообщение с оценкой
-    result_msg = (
-        f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-        f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-        f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
-    )
+    # Формируем сообщение
+    result_msg = f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+
     await message.answer(result_msg, parse_mode="HTML")
 
-    # Теперь ➡️ отправляем кнопки "Следующий", "Правильный ответ", "Главное меню"
-    nav_keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="✅ Показать правильный ответ")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
+    # ✅ После оценки — показываем навигационные кнопки (ИСПРАВЛЕНО НА INLINE)
+    nav_inline_keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
+            [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
+        ]
     )
-    await message.answer("👇 Что делаем дальше?", reply_markup=nav_keyboard)
+    await message.answer("👇 Что делаем дальше?", reply_markup=nav_inline_keyboard)
 
-    # Обновляем состояние
+    # Обновляем данные в состоянии
     await state.update_data(last_score=new_score, last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
