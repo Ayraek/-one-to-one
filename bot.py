@@ -1078,9 +1078,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
 )
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
-    
-    if text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]:
-        return
 
     current_state = await state.get_state()
     if current_state != TaskState.waiting_for_answer.state:
@@ -1091,31 +1088,30 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # --- НОВОЕ: обработка кнопок "Ответить текстом" и "Ответить голосом" ---
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
         await message.answer(
             "✏️ Напишите, пожалуйста, свой ответ текстом.",
-            reply_markup=types.ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove()
         )
+        # Остаёмся в состоянии ожидания текстового ответа
         return
 
     if text == "🎤 Ответить голосом":
         await message.answer(
             "🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.",
-            reply_markup=types.ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove()
         )
-        await state.set_state(TaskState.waiting_for_voice)  # Переходим в режим голосового ответа
+        await state.set_state(TaskState.waiting_for_voice)
         return
 
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
         await state.set_state(TaskState.waiting_for_clarification)
         await message.answer(
             "✏️ Напишите, что именно хотите уточнить по заданию:",
-            reply_markup=types.ReplyKeyboardRemove()
+            reply_markup=ReplyKeyboardRemove()
         )
         return
 
-    # --- Основная обработка текста ответа пользователя ---
     logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
 
@@ -1132,7 +1128,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Пользователь не найден.")
         return
 
-    # Проверка на GPT-шаблонные фразы
     if detect_gpt_phrases(text):
         await message.answer(
             "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
@@ -1140,7 +1135,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         return
 
-    # Оценка ответа
     student_name = user["name"]
     logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
     feedback_raw = await evaluate_answer(question, text, student_name)
@@ -1154,7 +1148,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
 
@@ -1170,14 +1163,12 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Собираем ответ для пользователя
     result_msg = ""
     if criteria_block:
-        result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+        result_msg += f"<b>\ud83d\udcca Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>\ud83e\uddee Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>\ud83d\udcac Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    # Клавиатура навигации
     inline_nav = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
         [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
@@ -1189,7 +1180,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
             await update_academy_points(message.from_user.id, new_score - last_score)
         else:
             await update_user_points(message.from_user.id, new_score - last_score)
-    
+
         await update_level(message.from_user.id)
         await save_user_answer(
             user_id=message.from_user.id,
@@ -1202,11 +1193,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    # --- Разные сценарии: академия или обычный вопрос ---
     if data.get("is_academy_task"):
         await message.answer(
-            "✅ Отличная работа над заданием Академии!\n\n"
-            "Выберите следующую тему или вернитесь в главное меню:",
+            "✅ Отличная работа над заданием Академии!\n\nВыберите следующую тему или вернитесь в главное меню:",
             reply_markup=await build_academy_topics_menu()
         )
     else:
@@ -1322,6 +1311,65 @@ async def process_voice_message(message: Message, state: FSMContext):
     await message.answer("👇 Что делаем дальше?", reply_markup=kb)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer) 
+
+async def process_real_student_answer(message: Message, state: FSMContext):
+    text = message.text.strip()
+    data = await state.get_data()
+    user = await get_user_from_db(message.from_user.id)
+
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.")
+        return
+
+    question = data.get("question")
+    grade = data.get("grade")
+
+    if not question or not grade:
+        await message.answer("⚠️ Ошибка: не найдены данные задания.")
+        return
+
+    # Проверяем текст на шаблонность (если у тебя есть detect_gpt_phrases)
+    if detect_gpt_phrases(text):
+        await message.answer(
+            "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
+            "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
+        )
+        return
+
+    # Оцениваем ответ через OpenAI
+    feedback_raw = await evaluate_answer(question, text, user["name"])
+
+    if not feedback_raw:
+        await message.answer("⚠️ Ошибка при проверке ответа. Попробуйте ещё раз.")
+        return
+
+    # Здесь распарсить фидбек и баллы
+    import re
+    pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
+    match = re.search(pattern, feedback_raw, re.DOTALL)
+
+    if match:
+        criteria_block = match.group(1).strip()
+        try:
+            new_score = float(match.group(2))
+        except ValueError:
+            new_score = 0.0
+        feedback_text = match.group(3).strip()
+    else:
+        criteria_block = ""
+        new_score = 0.0
+        feedback_text = feedback_raw.strip()
+
+    # Формируем сообщение
+    result_msg = f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+
+    await message.answer(result_msg, parse_mode="HTML")
+
+    # Обновляем данные в состоянии
+    await state.update_data(last_score=new_score, last_question=question, last_grade=grade)
+    await state.set_state(TaskState.waiting_for_answer)
 
 # --------------------------
 # Функции для работы с OpenAI
