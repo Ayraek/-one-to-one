@@ -1097,7 +1097,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
             "✏️ Напишите, пожалуйста, свой ответ текстом.",
             reply_markup=types.ReplyKeyboardRemove()
         )
-        await state.set_state(TaskState.waiting_for_answer)  # Остаёмся в том же состоянии
         return
 
     if text == "🎤 Ответить голосом":
