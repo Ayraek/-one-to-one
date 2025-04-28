@@ -73,6 +73,20 @@ ACADEMY_TOPICS = [
 welcome_text = (
     "💡 Добро пожаловать в \"One to One Booster bot\" — вашего личного ассистента для прокачки навыков в продакт-менеджменте!"
 )
+ACADEMY_SUBTOPICS = {
+    "research": [
+        ("interview", "📋 Интервью"),
+        ("usability", "🖥 Юзабилити тестирование"),
+        ("cjm", "🗺 CJM"),
+        ("quantitative", "📊 Количественные исследования"),
+    ],
+    "mvp": [
+        ("problem_research", "🔍 Исследование проблемы"),
+        ("prototype_testing", "🛠 Тестирование прототипа"),
+        ("value_proposition", "💎 Ценность продукта"),
+    ],
+    # И так далее для других тем
+}
 
 TOPICS = [
     "Гипотезы",
@@ -598,6 +612,7 @@ async def handle_junior_track(callback: CallbackQuery):
 async def handle_academy_topic(callback: CallbackQuery, state: FSMContext):
     user = await get_user_from_db(callback.from_user.id)
 
+    # Проверка доступа
     if not user or not user["is_academy_student"]:
         await callback.message.edit_text(
             "🚫 Доступ только для учеников Академии One to One!\n\n"
@@ -608,30 +623,70 @@ async def handle_academy_topic(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    # Выделяем тему из callback_data
+    # Получаем код раздела
     topic_key = callback.data.replace("academy_topic_", "").strip()
 
-    topics_map = {
-        "research": "Исследования",
-        "mvp": "Продукт и MVP",
-        "marketing": "Маркетинг IT продуктов",
-        "team": "Управление командой",
-        "analytics": "Продуктовая аналитика",
-        "strategy": "Стратегия",
-        "softskills": "Soft Skills"
-    }
+    # Ищем подтемы для выбранного раздела
+    subtopics = ACADEMY_SUBTOPICS.get(topic_key)
+    if not subtopics:
+        await callback.message.answer("❌ Ошибка: темы пока не найдены для этого раздела.")
+        return
 
-    topic_name = topics_map.get(topic_key, "—")
+    # Сохраняем текущий раздел в состояние
+    await state.update_data(selected_academy_topic=topic_key)
 
-    question = await generate_academy_question(topic_name, user["name"])
+    # Строим клавиатуру подтем
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=name, callback_data=f"academy_subtopic_{code}")]
+            for code, name in subtopics
+        ] + [[InlineKeyboardButton(text="🔙 Назад", callback_data="learning")]]
+    )
+
+    await callback.message.edit_text(
+        "🧠 <b>Выберите тему для практики:</b>",
+        parse_mode="HTML",
+        reply_markup=keyboard
+    )
+
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("academy_subtopic_"))
+async def handle_academy_subtopic(callback: CallbackQuery, state: FSMContext):
+    user = await get_user_from_db(callback.from_user.id)
+
+    if not user or not user["is_academy_student"]:
+        await callback.message.edit_text(
+            "🚫 Доступ только для учеников Академии One to One!\n\n"
+            "За подробностями пишите сюда: [@apyat](https://t.me/apyat)",
+            parse_mode="HTML",
+            disable_web_page_preview=True
+        )
+        await callback.answer()
+        return
+
+    # Определяем выбранную подтему
+    subtopic_key = callback.data.replace("academy_subtopic_", "").strip()
+    data = await state.get_data()
+    main_topic_key = data.get("selected_academy_topic", "")
+
+    subtopics = ACADEMY_SUBTOPICS.get(main_topic_key, [])
+    subtopic_name = next((name for code, name in subtopics if code == subtopic_key), "—")
+
+    if subtopic_name == "—":
+        await callback.message.answer("❌ Ошибка выбора темы.")
+        return
+
+    # Генерируем вопрос
+    question = await generate_academy_question(main_topic_key, subtopic_name, user["name"])
 
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(
         question=question,
         grade=user["level"],
-        selected_topic=topic_name,
+        selected_topic=subtopic_name,
         last_score=0.0,
-        is_academy_task=True  # 🧠 ВАЖНО! Помечаем, что это задача Академии
+        is_academy_task=True
     )
 
     keyboard = ReplyKeyboardMarkup(
@@ -645,10 +700,9 @@ async def handle_academy_topic(callback: CallbackQuery, state: FSMContext):
     )
 
     await callback.message.answer(
-        f"📝 Задание по теме «{topic_name}»:\n\n{question}\n\nЧто хотите сделать?",
+        f"🎯 Задание по подтеме «{subtopic_name}»:\n\n{question}\n\nЧто хотите сделать?",
         reply_markup=keyboard
     )
-
     await callback.answer()
 
 @router.callback_query(F.data == "track_senior")
@@ -758,7 +812,7 @@ async def show_academy_topics(callback: CallbackQuery):
     ])
 
     await callback.message.edit_text(
-        "🔍 <b>Выберите тему для обучения:</b>",
+        "🎯 <b>Выберите раздел для практики:</b>",
         parse_mode="HTML",
         reply_markup=keyboard
     )
@@ -1309,12 +1363,15 @@ async def generate_question(grade: str, topic: str, name: str) -> str:
         logging.error(f"Ошибка генерации вопроса: {e}")
         return "❌ Ошибка генерации вопроса."
 
-async def generate_academy_question(topic: str, name: str) -> str:
+async def generate_academy_question(main_topic: str, subtopic: str, name: str) -> str:
     prompt = (
-        f"Сгенерируй задание для ученика Академии по теме: {topic}. "
-        f"Уровень сложности: Junior или Middle. "
-        f"Формулируй естественно, как человек, без приветствий. "
-        f"Имя кандидата: {name}. Максимум 800 символов."
+        f"Ты преподаватель Академии. Сгенерируй задание для ученика {name} по разделу «{main_topic}» и подтеме «{subtopic}».\n\n"
+        "Формат:\n"
+        "- Задание должно быть небольшим, но заставлять подумать\n"
+        "- Строго связано с подтемой\n"
+        "- Без приветствий и воды\n"
+        "- Примеры: предложи что-то сделать, проанализировать, составить список, написать вопросы, подумать над ситуацией."
+        "\n\nТолько текст задания, максимум 800 символов."
     )
 
     try:
@@ -1323,7 +1380,7 @@ async def generate_academy_question(topic: str, name: str) -> str:
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": (
-                    "Ты преподаватель Академии. Генерируешь понятные, реалистичные задания по указанной теме, без лишних приветствий."
+                    "Ты преподаватель Академии. Генерируешь понятные, реалистичные задания строго по теме, без приветствий."
                 )},
                 {"role": "user", "content": prompt}
             ],
@@ -1334,6 +1391,7 @@ async def generate_academy_question(topic: str, name: str) -> str:
     except Exception as e:
         logging.error(f"Ошибка генерации задания Академии: {e}")
         return "❌ Ошибка генерации задания."
+
 
 async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
     prompt = (
