@@ -1331,7 +1331,7 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Ошибка: не найдены данные задания.")
         return
 
-    # Проверяем текст на шаблонность (если у тебя есть detect_gpt_phrases)
+    # Проверяем текст на шаблонность
     if detect_gpt_phrases(text):
         await message.answer(
             "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
@@ -1346,7 +1346,6 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Ошибка при проверке ответа. Попробуйте ещё раз.")
         return
 
-    # Здесь распарсить фидбек и баллы
     import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
@@ -1363,14 +1362,27 @@ async def process_real_student_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Формируем сообщение
-    result_msg = f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
-
+    # Формируем сообщение с оценкой
+    result_msg = (
+        f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+        f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+        f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+    )
     await message.answer(result_msg, parse_mode="HTML")
 
-    # Обновляем данные в состоянии
+    # Теперь ➡️ отправляем кнопки "Следующий", "Правильный ответ", "Главное меню"
+    nav_keyboard = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="➡️ Следующий вопрос")],
+            [KeyboardButton(text="✅ Показать правильный ответ")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
+    await message.answer("👇 Что делаем дальше?", reply_markup=nav_keyboard)
+
+    # Обновляем состояние
     await state.update_data(last_score=new_score, last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
