@@ -920,11 +920,15 @@ async def cb_next(call: CallbackQuery, state: FSMContext):
     grade=grade,
     selected_topic=topic
 )
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-      [InlineKeyboardButton(text="✍️ Ответить текстом", callback_data="start_answer")],
-      [InlineKeyboardButton(text="🎤 Ответить голосом", callback_data="start_voice")],
-      [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
-    ])
+    kb = ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
+            [KeyboardButton(text="❓ Уточнить по вопросу")],
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True,
+        one_time_keyboard=True
+    )
 
     await call.message.edit_text(f"Новый вопрос:\n\n{new_q}", reply_markup=kb)
     await call.answer()
