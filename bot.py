@@ -1078,6 +1078,9 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
 )
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
+    
+    if text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]:
+        return
 
     current_state = await state.get_state()
     if current_state != TaskState.waiting_for_answer.state:
@@ -1088,28 +1091,67 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    data = await state.get_data()
-    grade = data.get("grade")
-    question = data.get("question")
-    last_score = data.get("last_score", 0.0)
-    user = await get_user_from_db(message.from_user.id)
-
-    if not user or not grade or not question:
-        await message.answer("⚠️ Ошибка: нет данных для оценки.", reply_markup=get_main_menu())
-        await state.clear()
+    # --- НОВОЕ: обработка кнопок "Ответить текстом" и "Ответить голосом" ---
+    if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
+        await message.answer(
+            "✏️ Напишите, пожалуйста, свой ответ текстом.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        await state.set_state(TaskState.waiting_for_answer)  # Остаёмся в том же состоянии
         return
 
-    if detect_gpt_phrases(text):
+    if text == "🎤 Ответить голосом":
         await message.answer(
-            "⚠️ Ваш ответ похож на GPT-шаблон. Переформулируйте его своими словами."
+            "🎤 Пожалуйста, отправьте голосовое сообщение с вашим ответом.",
+            reply_markup=types.ReplyKeyboardRemove()
+        )
+        await state.set_state(TaskState.waiting_for_voice)  # Переходим в режим голосового ответа
+        return
+
+    if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
+        await state.set_state(TaskState.waiting_for_clarification)
+        await message.answer(
+            "✏️ Напишите, что именно хотите уточнить по заданию:",
+            reply_markup=types.ReplyKeyboardRemove()
         )
         return
 
+    # --- Основная обработка текста ответа пользователя ---
+    logging.info(f"[DEBUG] Received text: {repr(text)}")
+    data = await state.get_data()
+
+    grade = data.get("grade")
+    question = data.get("question")
+    last_score = data.get("last_score", 0.0)
+
+    if not grade or not question:
+        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
+        return
+
+    user = await get_user_from_db(message.from_user.id)
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.")
+        return
+
+    # Проверка на GPT-шаблонные фразы
+    if detect_gpt_phrases(text):
+        await message.answer(
+            "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
+            "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
+        )
+        return
+
+    # Оценка ответа
     student_name = user["name"]
+    logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
     feedback_raw = await evaluate_answer(question, text, student_name)
+    logging.info(f"[DEBUG] RAW FEEDBACK:\n{feedback_raw}")
 
     if not feedback_raw or "Ошибка" in feedback_raw:
-        await message.answer("❌ Ошибка при оценке. Попробуйте позже.", reply_markup=get_main_menu())
+        await message.answer(
+            "❌ Произошла ошибка при оценке ответа. Попробуйте снова или вернитесь в главное меню.",
+            reply_markup=get_main_menu()
+        )
         await state.clear()
         return
 
@@ -1129,49 +1171,49 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Фидбек всегда показываем
+    # Собираем ответ для пользователя
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    await message.answer(result_msg, parse_mode="HTML")
+    # Клавиатура навигации
+    inline_nav = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
+        [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
+    ])
 
-    # Если оценка выше предыдущей — добавляем баллы
     if new_score > last_score:
         if data.get("is_academy_task"):
             await update_academy_points(message.from_user.id, new_score - last_score)
         else:
             await update_user_points(message.from_user.id, new_score - last_score)
+    
         await update_level(message.from_user.id)
+        await save_user_answer(
+            user_id=message.from_user.id,
+            question=question,
+            answer=text,
+            grade=grade,
+            topic=data.get("selected_topic", "—"),
+            score=new_score,
+            state=state
+        )
+        await state.update_data(last_score=new_score)
 
-    await save_user_answer(
-        user_id=message.from_user.id,
-        question=question,
-        answer=text,
-        grade=grade,
-        topic=data.get("selected_topic", "—"),
-        score=new_score,
-        state=state
-    )
-
-    await state.update_data(last_score=new_score, last_question=question, last_grade=grade)
-
-    # Навигация после оценки
+    # --- Разные сценарии: академия или обычный вопрос ---
     if data.get("is_academy_task"):
         await message.answer(
-            "✅ Отличная работа над заданием Академии!\n\nВыберите следующую тему или вернитесь в главное меню:",
+            "✅ Отличная работа над заданием Академии!\n\n"
+            "Выберите следующую тему или вернитесь в главное меню:",
             reply_markup=await build_academy_topics_menu()
         )
     else:
-        inline_nav = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
-            [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")],
-        ])
-        await message.answer("👇 Что хотите сделать дальше?", reply_markup=inline_nav)
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
 
+    await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
 @router.message(TaskState.waiting_for_voice)
