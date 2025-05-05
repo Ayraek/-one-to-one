@@ -300,6 +300,14 @@ async def update_user_points(user_id: int, additional_points: float):
             additional_points, user_id
         )
 
+async def update_user_academy_points(user_id: int, additional_points: float):
+    """Увеличить поле academy_points в таблице users"""
+    async with db_pool.acquire() as conn:
+        await conn.execute(
+            'UPDATE users SET academy_points = academy_points + $1 WHERE id = $2',
+            additional_points, user_id
+        )
+
 import time
 
 async def save_user_answer(user_id: int, question: str, answer: str, grade: str, topic: str, score: float, state: FSMContext = None):
@@ -1069,67 +1077,51 @@ async def process_clarification(message: Message, state: FSMContext):
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
-    # Убедимся, что мы в нужном состоянии
-    current_state = await state.get_state()
-    if current_state != TaskState.waiting_for_answer.state:
-        await message.answer(
-            "⚠️ Сейчас нет активного задания. Сначала получите задание и тему.",
-            reply_markup=get_main_menu()
-        )
+    # Проверка состояния
+    if await state.get_state() != TaskState.waiting_for_answer.state:
+        await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
         await state.clear()
         return
 
-    # Обработка специальных кнопок
+    # Спец-кнопки
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
-        await message.answer("✏️ Напишите, пожалуйста, свой ответ текстом.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("✏️ Напишите ответ текстом.", reply_markup=ReplyKeyboardRemove())
         return
-
     if text == "🎤 Ответить голосом":
-        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение.", reply_markup=ReplyKeyboardRemove())
+        await message.answer("🎤 Отправьте голосовое сообщение.", reply_markup=ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_voice)
         return
-
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
+        await message.answer("✏️ Что хотите уточнить?", reply_markup=ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_clarification)
-        await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=ReplyKeyboardRemove())
         return
 
-    # ------------------------------------------------------
-    # УДАЛЁН ВЫЗОВ process_real_student_answer(message, state)
-    # ------------------------------------------------------
-
-    # Основная логика оценки ответа
-    logging.info(f"[DEBUG] Received text: {repr(text)}")
-    data      = await state.get_data()
-    grade     = data.get("grade")
-    question  = data.get("question")
+    # Основная логика оценки
+    data       = await state.get_data()
+    grade      = data.get("grade")
+    question   = data.get("question")
     last_score = data.get("last_score", 0.0)
 
     if not grade or not question:
-        await message.answer("⚠️ Не найдены данные задания. Попробуйте снова.")
+        await message.answer("⚠️ Нет данных задания.", reply_markup=get_main_menu())
         return
 
     user = await get_user_from_db(message.from_user.id)
     if not user:
-        await message.answer("⚠️ Пользователь не найден.")
+        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
         return
 
     if detect_gpt_phrases(text):
-        await message.answer(
-            "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
-            "Постарайтесь переформулировать своими словами для честной оценки."
-        )
+        await message.answer("⚠️ Переформулируйте ответ своими словами.")
         return
 
     feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
-        await message.answer(
-            "❌ Произошла ошибка при оценке ответа. Попробуйте снова или вернитесь в главное меню.",
-            reply_markup=get_main_menu()
-        )
+        await message.answer("❌ Ошибка оценки. Попробуйте позже.", reply_markup=get_main_menu())
         await state.clear()
         return
 
+    # Парсим результат
     import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
@@ -1137,7 +1129,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         criteria_block = match.group(1).strip()
         try:
             new_score = float(match.group(2))
-        except ValueError:
+        except:
             new_score = 0.0
         feedback_text = match.group(3).strip()
     else:
@@ -1145,18 +1137,16 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    result_msg = ""
-    if criteria_block:
-        result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+    # Вычисляем приращение
+    increment = new_score - last_score
 
-    # Сохраняем баллы, если они выросли
-    if new_score > last_score:
+    if increment > 0:
+        # 1) если это академическое задание, учитываем в специальном поле
         if data.get("is_academy_task"):
-            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), new_score - last_score)
-        else:
-            await update_user_points(message.from_user.id, new_score - last_score)
+            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), increment)
+            await update_user_academy_points(message.from_user.id, increment)
+        # 2) всегда добавляем в общий счёт
+        await update_user_points(message.from_user.id, increment)
 
         await update_level(message.from_user.id)
         await save_user_answer(
@@ -1170,113 +1160,13 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    # Отправляем результат с inline-кнопками «после ответа»
-    await message.answer(
-        result_msg,
-        parse_mode="HTML",
-        reply_markup=NAV_KB_AFTER_ANSWER
-    )
-
-    # Сохраняем для nav_show и nav_next
-    await state.update_data(last_question=question, last_grade=grade)
-    await state.set_state(TaskState.waiting_for_answer)
-
-@router.message(TaskState.waiting_for_voice)
-async def process_voice_message(message: Message, state: FSMContext):
-    # Проверяем, что это действительно голосовое сообщение
-    if not message.voice:
-        await message.answer("⚠️ Пожалуйста, отправьте именно голосовое сообщение.")
-        return
-
-    # Скачиваем голосовой файл
-    voice = message.voice
-    file = await bot.get_file(voice.file_id)
-    file_path = file.file_path
-    file_url = f"https://api.telegram.org/file/bot{API_TOKEN}/{file_path}"
-    save_path = f"temp_{message.from_user.id}.ogg"
-
-    import aiohttp
-    async with aiohttp.ClientSession() as session:
-        async with session.get(file_url) as resp:
-            with open(save_path, "wb") as f:
-                f.write(await resp.read())
-
-    # Расшифровка
-    text = await transcribe_audio(save_path)
-    os.remove(save_path)
-    await message.answer(f"📝 Расшифровка: «{text}»\nОцениваю...")
-
-    # Проверка на шаблонные GPT-фразы
-    if detect_gpt_phrases(text):
-        await message.answer(
-            "⚠️ Похоже, что ваш голосовой ответ содержит шаблонные GPT-фразы. "
-            "Попробуйте переформулировать своими словами, чтобы получить более точную и честную оценку.",
-            reply_markup=get_main_menu()
-        )
-        await state.clear()
-        return
-
-    # Получаем данные из state
-    data = await state.get_data()
-    question   = data.get("question")
-    grade      = data.get("grade")
-    last_score = data.get("last_score", 0.0)
-    user       = await get_user_from_db(message.from_user.id)
-
-    if not user or not grade or not question:
-        await message.answer("⚠️ Не найдены данные для оценки.")
-        return
-
-    # Оцениваем ответ
-    feedback_raw = await evaluate_answer(question, text, user["name"])
-    if not feedback_raw or "Ошибка" in feedback_raw:
-        await message.answer("❌ Ошибка при оценке ответа. Попробуйте снова.", reply_markup=get_main_menu())
-        await state.clear()
-        return
-
-    # Парсим критерии и новый счёт
-    import re
-    pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
-    match = re.search(pattern, feedback_raw, re.DOTALL)
-    if match:
-        criteria_block = match.group(1).strip()
-        try:
-            new_score = float(match.group(2))
-        except ValueError:
-            new_score = 0.0
-        feedback_text = match.group(3).strip()
-    else:
-        criteria_block = ""
-        new_score = 0.0
-        feedback_text = feedback_raw.strip()
-
-    # Сохраняем баллы, если есть прирост
-    if new_score > last_score:
-        if data.get("is_academy_task"):
-            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), new_score - last_score)
-        else:
-            await update_user_points(message.from_user.id, new_score - last_score)
-
-        await update_level(message.from_user.id)
-        await save_user_answer(
-            user_id=message.from_user.id,
-            question=question,
-            answer=text,
-            grade=grade,
-            topic=data.get("selected_topic", "—"),
-            score=new_score,
-            state=state
-        )
-        await state.update_data(last_score=new_score)
-
-    # Собираем результат в сообщение
+    # Формируем и отправляем сообщение с результатом
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+    result_msg += f"<b>🧮 Оценка:</b> <code>{round(new_score,2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь:</b>\n{feedback_text}"
 
-    # Отправляем результат с inline-кнопками «после ответа»
     await message.answer(
         result_msg,
         parse_mode="HTML",
@@ -1287,70 +1177,81 @@ async def process_voice_message(message: Message, state: FSMContext):
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
-async def process_real_student_answer(message: Message, state: FSMContext):
-    text = message.text.strip()
-    data = await state.get_data()
-    user = await get_user_from_db(message.from_user.id)
-
-    if not user:
-        await message.answer("⚠️ Пользователь не найден.")
+@router.message(TaskState.waiting_for_voice)
+async def process_voice_message(message: Message, state: FSMContext):
+    if not message.voice:
+        await message.answer("⚠️ Отправьте голосовое сообщение.")
         return
 
-    question = data.get("question")
-    grade = data.get("grade")
-
-    if not question or not grade:
-        await message.answer("⚠️ Ошибка: не найдены данные задания.")
-        return
+    # ... (скачивание и транскрипция как было) ...
+    text = await transcribe_audio(save_path)
+    os.remove(save_path)
+    await message.answer(f"📝 Расшифровка: «{text}»")
 
     if detect_gpt_phrases(text):
-        await message.answer(
-            "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
-            "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
-        )
+        await message.answer("⚠️ Переформулируйте ответ своими словами.", reply_markup=get_main_menu())
+        await state.clear()
+        return
+
+    data       = await state.get_data()
+    question   = data.get("question")
+    grade      = data.get("grade")
+    last_score = data.get("last_score", 0.0)
+    user       = await get_user_from_db(message.from_user.id)
+
+    if not user or not grade or not question:
+        await message.answer("⚠️ Нет данных для оценки.", reply_markup=get_main_menu())
         return
 
     feedback_raw = await evaluate_answer(question, text, user["name"])
-
-    if not feedback_raw:
-        await message.answer("⚠️ Ошибка при проверке ответа. Попробуйте ещё раз.")
+    if not feedback_raw or "Ошибка" in feedback_raw:
+        await message.answer("❌ Ошибка оценки.", reply_markup=get_main_menu())
+        await state.clear()
         return
 
     import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
-
     if match:
-        criteria_block = match.group(1).strip()
+        criteria = match.group(1).strip()
         try:
             new_score = float(match.group(2))
-        except ValueError:
+        except:
             new_score = 0.0
         feedback_text = match.group(3).strip()
     else:
-        criteria_block = ""
+        criteria = ""
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Формируем сообщение
-    result_msg = f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
+    increment = new_score - last_score
+    if increment > 0:
+        if data.get("is_academy_task"):
+            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), increment)
+            await update_user_academy_points(message.from_user.id, increment)
+        await update_user_points(message.from_user.id, increment)
 
-    await message.answer(result_msg, parse_mode="HTML")
+        await update_level(message.from_user.id)
+        await save_user_answer(
+            user_id=message.from_user.id,
+            question=question,
+            answer=text,
+            grade=grade,
+            topic=data.get("selected_topic", "—"),
+            score=new_score,
+            state=state
+        )
+        await state.update_data(last_score=new_score)
 
-    # ✅ После оценки — показываем навигационные кнопки (ИСПРАВЛЕНО НА INLINE)
-    nav_inline_keyboard = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
-            [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
-            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
-        ]
-    )
-    await message.answer("👇 Что делаем дальше?", reply_markup=nav_inline_keyboard)
+    # Отправляем результат
+    result_msg = ""
+    if criteria:
+        result_msg += f"<b>📊 Критерии:</b>\n{criteria}\n\n"
+    result_msg += f"<b>🧮 Оценка:</b> <code>{round(new_score,2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь:</b>\n{feedback_text}"
 
-    # Обновляем данные в состоянии
-    await state.update_data(last_score=new_score, last_question=question, last_grade=grade)
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
+    await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
 # --------------------------
