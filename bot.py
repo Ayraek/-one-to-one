@@ -69,9 +69,9 @@ storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 router = Router()
 dp.include_router(router)
-# Подключаем middleware для очистки истории (15 минут бездействия)
-dp.message.middleware(InactivityMiddleware(timeout_seconds=900))
-dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=900))
+# Подключаем middleware для очистки истории (2 часа бездействия)
+dp.message.middleware(InactivityMiddleware(timeout_seconds=7200))
+dp.callback_query.middleware(InactivityMiddleware(timeout_seconds=7200))
 
 # --------------------------
 # Настройка OpenAI клиента и логирование
