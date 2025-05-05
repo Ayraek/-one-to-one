@@ -1032,6 +1032,8 @@ async def process_clarification(message: Message, state: FSMContext):
     lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
 )
 async def handle_answer_navigation(message: Message, state: FSMContext):
+    logging.info(f"[DEBUG] Навигация: пришло сообщение '{message.text}' при состоянии {await state.get_state()}")
+
     text = message.text.strip()
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
@@ -1101,7 +1103,7 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
             one_time_keyboard=True
         )
 
-        await message.answer(f"🆕 Новый вопрос по теме «{topic}»:\n\n{new_q}", reply_markup=kb)
+        return await message.answer(f"🆕 Новый вопрос по теме «{topic}»:\n\n{new_q}", reply_markup=kb)
 
     
 # --------------------------
