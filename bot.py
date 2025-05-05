@@ -1032,24 +1032,28 @@ async def process_clarification(message: Message, state: FSMContext):
     lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
 )
 async def handle_answer_navigation(message: Message, state: FSMContext):
-    text = message.text
+    text = message.text.strip()
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
 
-    # 1) Главное меню
+    if not user:
+        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
+        await state.clear()
+        return
+
+    # Главное меню
     if text == "🏠 Главное меню":
         await state.clear()
-        return await message.answer("Вы вернулись в главное меню:", reply_markup=get_main_menu())
+        return await message.answer("🏠 Главное меню", reply_markup=get_main_menu())
 
-    # 2) Показать правильный ответ
+    # Показать правильный ответ
     if text == "✅ Показать правильный ответ":
-        last_q = data.get("last_question")
-        last_g = data.get("last_grade")
-        if not last_q or not last_g:
-            await state.clear()
-            return await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
-        
-        correct = await generate_correct_answer(last_q, last_g)
+        question = data.get("last_question")
+        grade = data.get("last_grade")
+        if not question or not grade:
+            await message.answer("⚠️ Нет активного задания.")
+            return
+        correct = await generate_correct_answer(question, grade)
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton("➡️ Следующий вопрос")],
@@ -1058,40 +1062,35 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
             resize_keyboard=True,
             one_time_keyboard=True
         )
-        return await message.answer(
-            f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
-            parse_mode="HTML",
-            reply_markup=kb
-        )
+        return await message.answer(f"✅ Эталонный ответ:\n\n{correct}", parse_mode="HTML", reply_markup=kb)
 
-    # 3) Следующий вопрос
+    # Следующий вопрос
     if text == "➡️ Следующий вопрос":
         grade = data.get("grade")
         topic = data.get("selected_topic")
         is_academy = data.get("is_academy_task", False)
 
-        if not grade or not topic or not user:
-            return await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
+        if not grade or not topic:
+            return await message.answer("⚠️ Не найдены данные о предыдущем задании.", reply_markup=get_main_menu())
 
         # Генерация нового вопроса
         if is_academy:
             main_topic = data.get("selected_academy_topic", "")
-            question = await generate_academy_question(main_topic, topic, user["name"])
+            new_q = await generate_academy_question(main_topic, topic, user["name"])
         else:
-            question = await generate_question(grade, topic, user["name"])
+            new_q = await generate_question(grade, topic, user["name"])
 
-        # Защита от пустых или ошибочных вопросов
-        if not question or "Ошибка" in question:
-            return await message.answer("⚠️ Ошибка при генерации нового задания. Попробуйте позже.", reply_markup=get_main_menu())
+        if not new_q or "Ошибка" in new_q:
+            return await message.answer("❌ Ошибка при генерации нового задания.", reply_markup=get_main_menu())
 
         # Обновляем состояние
+        await state.set_state(TaskState.waiting_for_answer)
         await state.update_data(
-            question=question,
+            question=new_q,
+            last_question=new_q,
             last_score=0.0,
-            last_question=question,
             last_grade=grade
         )
-        await state.set_state(TaskState.waiting_for_answer)
 
         kb = ReplyKeyboardMarkup(
             keyboard=[
@@ -1102,12 +1101,8 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
             one_time_keyboard=True
         )
 
-        logging.info(f"[DEBUG] Новый вопрос сгенерирован:\n{question}")
+        await message.answer(f"🆕 Новый вопрос по теме «{topic}»:\n\n{new_q}", reply_markup=kb)
 
-        return await message.answer(
-            f"🆕 Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{question}",
-            reply_markup=kb
-        )
     
 # --------------------------
 # Общий обработчик для TaskState.waiting_for_answer
