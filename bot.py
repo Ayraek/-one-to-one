@@ -1517,7 +1517,7 @@ async def transcribe_audio(file_path: str) -> str:
 # Автостарт при любой активности вне FSM
 # --------------------------
 
-@router.message(StateFilter(None))
+@router.message()
 async def catch_all(message: Message, state: FSMContext):
     current_state = await state.get_state()
     # теперь этот хендлер никогда не будет ловить messages, когда state != None
