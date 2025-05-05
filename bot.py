@@ -1048,11 +1048,16 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         if not last_q or not last_g:
             await state.clear()
             return await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
+        
         correct = await generate_correct_answer(last_q, last_g)
-        kb = ReplyKeyboardMarkup([
-            [KeyboardButton("➡️ Следующий вопрос")],
-            [KeyboardButton("🏠 Главное меню")]
-        ], resize_keyboard=True, one_time_keyboard=True)
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton("➡️ Следующий вопрос")],
+                [KeyboardButton("🏠 Главное меню")]
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
         return await message.answer(
             f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
             parse_mode="HTML",
@@ -1075,6 +1080,10 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         else:
             question = await generate_question(grade, topic, user["name"])
 
+        # Защита от пустых или ошибочных вопросов
+        if not question or "Ошибка" in question:
+            return await message.answer("⚠️ Ошибка при генерации нового задания. Попробуйте позже.", reply_markup=get_main_menu())
+
         # Обновляем состояние
         await state.update_data(
             question=question,
@@ -1084,7 +1093,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         )
         await state.set_state(TaskState.waiting_for_answer)
 
-        # Кнопки
         kb = ReplyKeyboardMarkup(
             keyboard=[
                 [KeyboardButton("✍️ Ответить текстом"), KeyboardButton("🎤 Ответить голосом")],
@@ -1094,11 +1102,12 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
             one_time_keyboard=True
         )
 
+        logging.info(f"[DEBUG] Новый вопрос сгенерирован:\n{question}")
+
         return await message.answer(
             f"🆕 Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{question}",
             reply_markup=kb
         )
-
     
 # --------------------------
 # Общий обработчик для TaskState.waiting_for_answer
