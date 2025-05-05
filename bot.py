@@ -1073,8 +1073,9 @@ async def process_clarification(message: Message, state: FSMContext):
 # Общий обработчик для TaskState.waiting_for_answer
 # --------------------------
 
-@router.message(StateFilter(TaskState.waiting_for_answer), F.text)
+@router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
+    logging.debug("Got user answer in waiting_for_answer")  # временный лог для отладки
     text = message.text.strip()
 
     # 2) Специальные кнопки: текст/голос/уточнение
