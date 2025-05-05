@@ -1077,12 +1077,6 @@ async def process_clarification(message: Message, state: FSMContext):
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
-    # 1) Проверка, что мы в состоянии ожидания ответа
-    if await state.get_state() != TaskState.waiting_for_answer.state:
-        await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
-        await state.clear()
-        return
-
     # 2) Специальные кнопки: текст/голос/уточнение
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
         await message.answer("✏️ Напишите ответ текстом.", reply_markup=ReplyKeyboardRemove())
