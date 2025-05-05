@@ -1084,6 +1084,7 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(TaskState.waiting_for_answer)
 async def handle_task_answer(message: Message, state: FSMContext):
+    print("✅ Пользователь написал ответ")
     logging.debug("Got user answer in waiting_for_answer")  # временный лог для отладки
     text = message.text.strip()
 
