@@ -274,6 +274,7 @@ async def create_db_pool():
             $$;
         ''')
    
+   
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS academy_progress (
                 user_id BIGINT,
