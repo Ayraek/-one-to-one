@@ -6,6 +6,7 @@ logging.basicConfig(level=logging.DEBUG)
 import asyncpg
 import asyncio
 from urllib.parse import urlparse
+import math
 
 from dotenv import load_dotenv
 load_dotenv()
@@ -61,6 +62,7 @@ NAV_KB_AFTER_SHOW = InlineKeyboardMarkup(inline_keyboard=[
 # Пороги для анти-чит-проверок
 AI_CLASSIFIER_CONFIDENCE = 0.8       # если классификатор уверен ≥ 80%
 PERPLEXITY_THRESHOLD     = 15.0      # если средняя log-вероятность < 15
+SIMILARITY_THRESHOLD = 0.90
 # ────────────────────────────────────────────────────
 # --------------------------
 # Инициализация бота и диспетчера
@@ -1166,6 +1168,39 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
+    # ─── ANTI-CHEAT STEP 3: EMBEDDING-SIMILARITY С ЭТАЛОННЫМ ─────────────
+    # 1) Генерируем эталонный ответ
+    correct = await generate_correct_answer(question, grade)
+    # 2) Берём эмбеддинги студента и эталона
+    stud_emb = await client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=text
+    )
+    corr_emb = await client.embeddings.create(
+        model="text-embedding-ada-002",
+        input=correct
+    )
+    v1 = stud_emb.data[0].embedding
+    v2 = corr_emb.data[0].embedding
+    # 3) Косинусная схожесть
+    dot = sum(a*b for a, b in zip(v1, v2))
+    norm1 = math.sqrt(sum(a*a for a in v1))
+    norm2 = math.sqrt(sum(b*b for b in v2))
+    cos_sim = dot / (norm1 * norm2) if norm1 and norm2 else 0.0
+    if cos_sim >= SIMILARITY_THRESHOLD:
+        # Помечаем копипаст
+        result_msg = (
+            "<b>📊 Критерии:</b>\n"
+            "• Соответствие вопросу: 0.00\n\n"
+            "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
+            "<b>💬 Обратная связь (Feedback):</b>\n"
+            "Ваш ответ слишком близок к эталонному — вероятно, скопирован из ИИ. "
+            "Пожалуйста, переформулируйте своими словами."
+        )
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
+        return
+    # ───────────────────────────────────────────────────────────────────
+    
     # Сохранение очков
     increment = new_score - last_score
     if increment > 0:
