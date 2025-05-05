@@ -7,7 +7,8 @@ import asyncpg
 import asyncio
 from urllib.parse import urlparse
 import math
-
+from aiogram.filters import StateFilter
+from aiogram import F
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -274,7 +275,7 @@ async def create_db_pool():
             $$;
         ''')
    
-   
+
         await conn.execute('''
             CREATE TABLE IF NOT EXISTS academy_progress (
                 user_id BIGINT,
@@ -1072,10 +1073,7 @@ async def process_clarification(message: Message, state: FSMContext):
 # Общий обработчик для TaskState.waiting_for_answer
 # --------------------------
 
-@router.message(
-    TaskState.waiting_for_answer,
-    lambda m: m.text not in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
-)
+@router.message(StateFilter(TaskState.waiting_for_answer), F.text)
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
