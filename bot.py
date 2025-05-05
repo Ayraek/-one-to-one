@@ -887,41 +887,31 @@ async def handle_grade_selection(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("topic_"))
 async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
+    # Достаём выбранную тему и проверяем пользователя
     chosen_topic = callback.data.replace("topic_", "").strip()
     data = await state.get_data()
     selected_grade = data.get("selected_grade")
     user = await get_user_from_db(callback.from_user.id)
 
     if not selected_grade or not user:
-        await callback.message.answer("⚠️ Ошибка: не найдены грейд или пользователь. Попробуйте выбрать заново.", reply_markup=get_grades_menu())
-        await callback.answer()
+        await callback.answer("⚠️ Что-то пошло не так. Сначала выберите грейд и тему.", show_alert=True)
         return
 
+    # Генерируем вопрос
     question = await generate_question(selected_grade, chosen_topic, user["name"])
-    if not question or "Ошибка" in question:
-        await callback.message.answer(
-            "❌ Не удалось сгенерировать вопрос. Попробуйте позже или выберите другую тему.",
-            reply_markup=get_main_menu()
-        )
-        await state.clear()
-        await callback.answer()
+    if not question or question.startswith("❌"):
+        await callback.answer("❌ Не удалось сгенерировать вопрос. Попробуйте другую тему.", show_alert=True)
         return
 
+    # Переходим в состояние ожидания ответа
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
 
-    keyboard = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
-            [KeyboardButton(text="❓ Уточнить по вопросу")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
-    await callback.message.answer(
-        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\nЧто хотите сделать?",
-        reply_markup=keyboard
+    # Редактируем сообщение: текст + inline-клавиатура NAV_KB_QUESTION
+    await callback.message.edit_text(
+        f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\n"
+        "Что хотите сделать?",
+        reply_markup=NAV_KB_QUESTION
     )
     await callback.answer()
 
