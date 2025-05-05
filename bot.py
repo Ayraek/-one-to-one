@@ -37,10 +37,11 @@ admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
 # ────────────────────────────────────────────────────
 # inline-клавиатуры для навигации
-# После генерации нового вопроса
+
+# После генерации нового вопроса — только ответ текстом, ответ голосом, уточнение и «Назад»
 NAV_KB_QUESTION = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="✍️ Ответить текстом",   callback_data="start_answer")],
-    [InlineKeyboardButton(text="🎤 Ответить голосом",    callback_data="start_voice")],
+    [InlineKeyboardButton(text="✍️ Ответить текстом",   callback_data="start_answer"),
+     InlineKeyboardButton(text="🎤 Ответить голосом",    callback_data="start_voice")],
     [InlineKeyboardButton(text="❓ Уточнить вопрос",      callback_data="clarify_info")],
     [InlineKeyboardButton(text="🔙 Назад",                callback_data="back_to_topics")],
 ])
@@ -428,13 +429,6 @@ async def show_profile(callback: CallbackQuery):
 
     await callback.answer()
 
-@router.callback_query(F.data == "start_answering")
-async def start_answering(callback: CallbackQuery):
-    await callback.message.answer(
-        "✏️ Напишите свой ответ сообщением.",
-        reply_markup=types.ReplyKeyboardRemove()
-    )
-    await callback.answer()
 
 @router.message(lambda msg: msg.text == "/start")
 async def cmd_start(message: Message, state: FSMContext):
@@ -976,19 +970,32 @@ async def cb_main(call: CallbackQuery, state: FSMContext):
     await call.answer()
 
 @router.callback_query(F.data == "start_answer")
-async def handle_start_answer_callback(callback: CallbackQuery, state: FSMContext):
-    await callback.message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=ReplyKeyboardRemove())
+async def cb_start_answer(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()  # скрываем «часики»
+    # переходим в режим ожидания текстового ответа
     await state.set_state(TaskState.waiting_for_answer)
+    await callback.message.answer(
+        "✏️ Пожалуйста, напишите свой ответ текстом.",
+        reply_markup=ReplyKeyboardRemove()
+    )
+
+@router.callback_query(F.data == "start_voice")
+async def cb_start_voice(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    await state.set_state(TaskState.waiting_for_voice)
+    await callback.message.answer(
+        "🎤 Отправьте голосовое сообщение.",
+        reply_markup=ReplyKeyboardRemove()
+    )
 
 @router.callback_query(F.data == "back_to_topics")
 async def back_to_topics(callback: CallbackQuery, state: FSMContext):
-    # Просто возвращаем пользователя к выбору темы на том же грейде
+    await state.clear()  # убираем старый вопрос из памяти
+    await callback.answer()
     await callback.message.edit_text(
-        "Выберите тему для задания:", 
+        "Выберите тему для задания:",
         reply_markup=get_topics_menu()
     )
-    await callback.answer()
 
 # --------------------------
 # Поведение при уточнении
