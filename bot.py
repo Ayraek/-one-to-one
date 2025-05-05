@@ -911,6 +911,7 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 
     import time
     await state.update_data(question_time=time.time())
+    print("⚙️ Состояние FSM установлено: waiting_for_answer")
 
 
     await callback.message.edit_text(
