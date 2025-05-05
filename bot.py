@@ -58,7 +58,9 @@ NAV_KB_AFTER_SHOW = InlineKeyboardMarkup(inline_keyboard=[
     [InlineKeyboardButton(text="🏠 Главное меню",        callback_data="nav_main")]
 ])
 # ────────────────────────────────────────────────────
-
+# Пороги для анти-чит-проверок
+AI_CLASSIFIER_CONFIDENCE = 0.8       # если классификатор уверен ≥ 80%
+PERPLEXITY_THRESHOLD     = 15.0      # если средняя log-вероятность < 15
 # ────────────────────────────────────────────────────
 # --------------------------
 # Инициализация бота и диспетчера
@@ -1059,13 +1061,13 @@ async def process_clarification(message: Message, state: FSMContext):
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
-    # Проверка состояния
+    # 1) Проверка, что мы в состоянии ожидания ответа
     if await state.get_state() != TaskState.waiting_for_answer.state:
         await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
         await state.clear()
         return
 
-    # Спец-кнопки
+    # 2) Специальные кнопки: текст/голос/уточнение
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
         await message.answer("✏️ Напишите ответ текстом.", reply_markup=ReplyKeyboardRemove())
         return
@@ -1078,7 +1080,52 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.set_state(TaskState.waiting_for_clarification)
         return
 
-    # Достаём данные из state
+    # ─── ANTI-CHEAT STEP 1: AI-КЛАССИФИКАТОР ───────────────────────────
+    try:
+        cls = await client.classifications.create(
+            model="text-classification-001",
+            query=text
+        )
+        if cls.label == "AI" and cls.confidence >= AI_CLASSIFIER_CONFIDENCE:
+            result_msg = (
+                "<b>📊 Критерии:</b>\n"
+                "• Соответствие вопросу: 0.00\n\n"
+                "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
+                "<b>💬 Обратная связь (Feedback):</b>\n"
+                "Ответ выглядит сгенерированным ИИ. Пожалуйста, напишите своими словами."
+            )
+            await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
+            return
+    except Exception as e:
+        logging.warning(f"[AntiCheat] Classifier error: {e}")
+    # ────────────────────────────────────────────────────────────────────
+
+    # ─── ANTI-CHEAT STEP 2: PERPLEXITY ЧЕРЕЗ DAVINCI ────────────────────
+    try:
+        perp_resp = await client.completions.create(
+            model="text-davinci-003",
+            prompt=text,
+            max_tokens=1,
+            logprobs=1
+        )
+        token_logprobs = perp_resp.choices[0].logprobs.token_logprobs or []
+        if token_logprobs:
+            avg_lp = sum(abs(lp) for lp in token_logprobs) / len(token_logprobs)
+            if avg_lp < PERPLEXITY_THRESHOLD:
+                result_msg = (
+                    "<b>📊 Критерии:</b>\n"
+                    "• Соответствие вопросу: 0.00\n\n"
+                    "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
+                    "<b>💬 Обратная связь (Feedback):</b>\n"
+                    "Ответ слишком «модельный», возможно это копипаст. Попробуйте переформулировать."
+                )
+                await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
+                return
+    except Exception as e:
+        logging.warning(f"[AntiCheat] Perplexity error: {e}")
+    # ────────────────────────────────────────────────────────────────────
+
+    # 3) Основная логика оценки
     data       = await state.get_data()
     grade      = data.get("grade")
     question   = data.get("question")
@@ -1093,32 +1140,17 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
         return
 
-    # Примитивная детекция нерелевантного ответа
-    low_text = text.lower()
-    if len(text) < 5 or low_text in {"не знаю", "нет ответа", "-", ""}:
-        result_msg = (
-            "<b>📊 Критерии:</b>\n"
-            "• Соответствие вопросу: 0.00\n\n"
-            "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
-            "<b>💬 Обратная связь (Feedback):</b>\n"
-            "Ответ не соответствует вопросу. Пожалуйста, попробуйте ещё раз, опираясь на суть задания."
-        )
-        await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
-        return
-
-    # Проверка на шаблонные фразы
     if detect_gpt_phrases(text):
         await message.answer("⚠️ Переформулируйте ответ своими словами.", reply_markup=NAV_KB_AFTER_ANSWER)
         return
 
-    # Обычная оценка через OpenAI
     feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
         await message.answer("❌ Ошибка оценки. Попробуйте позже.", reply_markup=get_main_menu())
         await state.clear()
         return
 
-    # Парсим результат
+    # Парсинг критериев и подсчёт баллов
     import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
@@ -1134,7 +1166,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Вычисляем приращение
+    # Сохранение очков
     increment = new_score - last_score
     if increment > 0:
         if data.get("is_academy_task"):
@@ -1153,7 +1185,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    # Формируем и отправляем сообщение с результатом
+    # Финальный вывод
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
@@ -1161,10 +1193,9 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
     await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
-
-    # Сохраняем для навигации
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
+
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
