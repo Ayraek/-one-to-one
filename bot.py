@@ -1079,7 +1079,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Обработка специальных кнопок (хотя inline-кнопок здесь нет)
+    # Обработка специальных кнопок
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
         await message.answer("✏️ Напишите, пожалуйста, свой ответ текстом.", reply_markup=ReplyKeyboardRemove())
         return
@@ -1094,12 +1094,15 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=ReplyKeyboardRemove())
         return
 
-    # Если не спец-кнопка — обрабатываем ответ студента
-    await process_real_student_answer(message, state)
+    # ------------------------------------------------------
+    # УДАЛЁН ВЫЗОВ process_real_student_answer(message, state)
+    # ------------------------------------------------------
 
-    data = await state.get_data()
-    grade    = data.get("grade")
-    question = data.get("question")
+    # Основная логика оценки ответа
+    logging.info(f"[DEBUG] Received text: {repr(text)}")
+    data      = await state.get_data()
+    grade     = data.get("grade")
+    question  = data.get("question")
     last_score = data.get("last_score", 0.0)
 
     if not grade or not question:
@@ -1111,7 +1114,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Пользователь не найден.")
         return
 
-    # Проверка на шаблонные фразы
     if detect_gpt_phrases(text):
         await message.answer(
             "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
@@ -1119,7 +1121,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         return
 
-    # Оцениваем ответ
     feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
         await message.answer(
@@ -1129,7 +1130,6 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Извлекаем критерии, новый счёт и текст фидбэка
     import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
@@ -1145,14 +1145,13 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # Формируем сообщение с результатами
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    # Если есть прирост баллов — сохраняем их и апдейтим уровень
+    # Сохраняем баллы, если они выросли
     if new_score > last_score:
         if data.get("is_academy_task"):
             await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), new_score - last_score)
@@ -1171,7 +1170,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    # Отправляем результат вместе с inline-клавиатурой «после ответа»
+    # Отправляем результат с inline-кнопками «после ответа»
     await message.answer(
         result_msg,
         parse_mode="HTML",
