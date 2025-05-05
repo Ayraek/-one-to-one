@@ -37,12 +37,12 @@ admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
 # ────────────────────────────────────────────────────
 # inline-клавиатуры для навигации
-# После генерации нового вопроса (есть кнопка «Уточнить»)
+# После генерации нового вопроса
 NAV_KB_QUESTION = InlineKeyboardMarkup(inline_keyboard=[
-    [InlineKeyboardButton(text="➡️ Следующий вопрос",        callback_data="nav_next")],
-    [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
-    [InlineKeyboardButton(text="❓ Уточнить вопрос",           callback_data="clarify_info")],
-    [InlineKeyboardButton(text="🏠 Главное меню",             callback_data="nav_main")]
+    [InlineKeyboardButton(text="✍️ Ответить текстом",   callback_data="start_answer")],
+    [InlineKeyboardButton(text="🎤 Ответить голосом",    callback_data="start_voice")],
+    [InlineKeyboardButton(text="❓ Уточнить вопрос",      callback_data="clarify_info")],
+    [InlineKeyboardButton(text="🔙 Назад",                callback_data="back_to_topics")],
 ])
 
 # После оценки ответа (без кнопки «Уточнить»)
@@ -911,7 +911,6 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
 
-    # Редактируем сообщение: текст + inline-клавиатура NAV_KB_QUESTION
     await callback.message.edit_text(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\n"
         "Что хотите сделать?",
@@ -980,6 +979,15 @@ async def cb_main(call: CallbackQuery, state: FSMContext):
 async def handle_start_answer_callback(callback: CallbackQuery, state: FSMContext):
     await callback.message.answer("✏️ Напишите, пожалуйста, свой ответ.", reply_markup=ReplyKeyboardRemove())
     await state.set_state(TaskState.waiting_for_answer)
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_topics")
+async def back_to_topics(callback: CallbackQuery, state: FSMContext):
+    # Просто возвращаем пользователя к выбору темы на том же грейде
+    await callback.message.edit_text(
+        "Выберите тему для задания:", 
+        reply_markup=get_topics_menu()
+    )
     await callback.answer()
 
 # --------------------------
@@ -1200,7 +1208,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
         return
     # ───────────────────────────────────────────────────────────────────
-    
+
     # Сохранение очков
     increment = new_score - last_score
     if increment > 0:
