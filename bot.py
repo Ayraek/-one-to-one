@@ -1032,29 +1032,23 @@ async def process_clarification(message: Message, state: FSMContext):
     lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
 )
 async def handle_answer_navigation(message: Message, state: FSMContext):
-    logging.info(f"[DEBUG] Навигация: пришло сообщение '{message.text}' при состоянии {await state.get_state()}")
-
     text = message.text.strip()
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
 
     if not user:
-        await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
         await state.clear()
-        return
+        return await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
 
-    # Главное меню
     if text == "🏠 Главное меню":
         await state.clear()
         return await message.answer("🏠 Главное меню", reply_markup=get_main_menu())
 
-    # Показать правильный ответ
     if text == "✅ Показать правильный ответ":
         question = data.get("last_question")
         grade = data.get("last_grade")
         if not question or not grade:
-            await message.answer("⚠️ Нет активного задания.")
-            return
+            return await message.answer("⚠️ Нет активного задания.")
         correct = await generate_correct_answer(question, grade)
         kb = ReplyKeyboardMarkup(
             keyboard=[
@@ -1066,7 +1060,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         )
         return await message.answer(f"✅ Эталонный ответ:\n\n{correct}", parse_mode="HTML", reply_markup=kb)
 
-    # Следующий вопрос
     if text == "➡️ Следующий вопрос":
         grade = data.get("grade")
         topic = data.get("selected_topic")
@@ -1075,7 +1068,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         if not grade or not topic:
             return await message.answer("⚠️ Не найдены данные о предыдущем задании.", reply_markup=get_main_menu())
 
-        # Генерация нового вопроса
         if is_academy:
             main_topic = data.get("selected_academy_topic", "")
             new_q = await generate_academy_question(main_topic, topic, user["name"])
@@ -1085,7 +1077,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         if not new_q or "Ошибка" in new_q:
             return await message.answer("❌ Ошибка при генерации нового задания.", reply_markup=get_main_menu())
 
-        # Обновляем состояние
         await state.set_state(TaskState.waiting_for_answer)
         await state.update_data(
             question=new_q,
@@ -1104,7 +1095,6 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
         )
 
         return await message.answer(f"🆕 Новый вопрос по теме «{topic}»:\n\n{new_q}", reply_markup=kb)
-
     
 # --------------------------
 # Общий обработчик для TaskState.waiting_for_answer
