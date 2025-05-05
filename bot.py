@@ -1078,7 +1078,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.set_state(TaskState.waiting_for_clarification)
         return
 
-    # Основная логика оценки
+    # Достаём данные из state
     data       = await state.get_data()
     grade      = data.get("grade")
     question   = data.get("question")
@@ -1093,10 +1093,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
         return
 
-    if detect_gpt_phrases(text):
-        await message.answer("⚠️ Переформулируйте ответ своими словами.")
+    # Примитивная детекция нерелевантного ответа
+    low_text = text.lower()
+    if len(text) < 5 or low_text in {"не знаю", "нет ответа", "-", ""}:
+        result_msg = (
+            "<b>📊 Критерии:</b>\n"
+            "• Соответствие вопросу: 0.00\n\n"
+            "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
+            "<b>💬 Обратная связь (Feedback):</b>\n"
+            "Ответ не соответствует вопросу. Пожалуйста, попробуйте ещё раз, опираясь на суть задания."
+        )
+        await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
         return
 
+    # Проверка на шаблонные фразы
+    if detect_gpt_phrases(text):
+        await message.answer("⚠️ Переформулируйте ответ своими словами.", reply_markup=NAV_KB_AFTER_ANSWER)
+        return
+
+    # Обычная оценка через OpenAI
     feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
         await message.answer("❌ Ошибка оценки. Попробуйте позже.", reply_markup=get_main_menu())
@@ -1121,15 +1136,11 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
     # Вычисляем приращение
     increment = new_score - last_score
-
     if increment > 0:
-        # 1) если это академическое задание, учитываем в специальном поле
         if data.get("is_academy_task"):
             await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), increment)
             await update_user_academy_points(message.from_user.id, increment)
-        # 2) всегда добавляем в общий счёт
         await update_user_points(message.from_user.id, increment)
-
         await update_level(message.from_user.id)
         await save_user_answer(
             user_id=message.from_user.id,
@@ -1146,14 +1157,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>🧮 Оценка:</b> <code>{round(new_score,2)}</code>\n\n"
-    result_msg += f"<b>💬 Обратная связь:</b>\n{feedback_text}"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score,2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    await message.answer(
-        result_msg,
-        parse_mode="HTML",
-        reply_markup=NAV_KB_AFTER_ANSWER
-    )
+    await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
 
     # Сохраняем для навигации
     await state.update_data(last_question=question, last_grade=grade)
