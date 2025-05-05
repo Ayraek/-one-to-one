@@ -1032,8 +1032,6 @@ async def process_clarification(message: Message, state: FSMContext):
     lambda m: m.text in ["➡️ Следующий вопрос", "✅ Показать правильный ответ", "🏠 Главное меню"]
 )
 async def handle_answer_navigation(message: Message, state: FSMContext):
-    ...
-
     text = message.text
     data = await state.get_data()
     user = await get_user_from_db(message.from_user.id)
@@ -1045,31 +1043,61 @@ async def handle_answer_navigation(message: Message, state: FSMContext):
 
     # 2) Показать правильный ответ
     if text == "✅ Показать правильный ответ":
-        last_q = data.get("last_question"); last_g = data.get("last_grade")
+        last_q = data.get("last_question")
+        last_g = data.get("last_grade")
         if not last_q or not last_g:
             await state.clear()
             return await message.answer("⚠️ Сейчас нет активного задания.", reply_markup=get_main_menu())
         correct = await generate_correct_answer(last_q, last_g)
-        kb = ReplyKeyboardMarkup([[KeyboardButton("➡️ Следующий вопрос")],
-                                  [KeyboardButton("🏠 Главное меню")]],
-                                  resize_keyboard=True, one_time_keyboard=True)
-        return await message.answer(f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
-                                    parse_mode="HTML", reply_markup=kb)
+        kb = ReplyKeyboardMarkup([
+            [KeyboardButton("➡️ Следующий вопрос")],
+            [KeyboardButton("🏠 Главное меню")]
+        ], resize_keyboard=True, one_time_keyboard=True)
+        return await message.answer(
+            f"✅ Эталонный ответ уровня {last_g}:\n\n{correct}",
+            parse_mode="HTML",
+            reply_markup=kb
+        )
 
     # 3) Следующий вопрос
     if text == "➡️ Следующий вопрос":
-        grade = data.get("grade"); topic = data.get("selected_topic")
+        grade = data.get("grade")
+        topic = data.get("selected_topic")
+        is_academy = data.get("is_academy_task", False)
+
         if not grade or not topic or not user:
             return await message.answer("⚠️ Ошибка: не найдены нужные данные.", reply_markup=get_main_menu())
-        new_q = await generate_question(grade, topic, user["name"])
-        await state.update_data(question=new_q, last_score=0.0)
+
+        # Генерация нового вопроса
+        if is_academy:
+            main_topic = data.get("selected_academy_topic", "")
+            question = await generate_academy_question(main_topic, topic, user["name"])
+        else:
+            question = await generate_question(grade, topic, user["name"])
+
+        # Обновляем состояние
+        await state.update_data(
+            question=question,
+            last_score=0.0,
+            last_question=question,
+            last_grade=grade
+        )
         await state.set_state(TaskState.waiting_for_answer)
-        kb = ReplyKeyboardMarkup([
+
+        # Кнопки
+        kb = ReplyKeyboardMarkup(
+            keyboard=[
                 [KeyboardButton("✍️ Ответить текстом"), KeyboardButton("🎤 Ответить голосом")],
                 [KeyboardButton("❓ Уточнить"), KeyboardButton("🏠 Главное меню")]
-            ], resize_keyboard=True, one_time_keyboard=True)
-        return await message.answer(f"Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{new_q}",
-                                    reply_markup=kb)
+            ],
+            resize_keyboard=True,
+            one_time_keyboard=True
+        )
+
+        return await message.answer(
+            f"🆕 Новый вопрос для уровня {grade} по теме «{topic}»:\n\n{question}",
+            reply_markup=kb
+        )
 
     
 # --------------------------
