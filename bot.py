@@ -722,6 +722,8 @@ async def handle_academy_subtopic(callback: CallbackQuery, state: FSMContext):
         last_score=0.0,
         is_academy_task=True
     )
+    import time
+    await state.update_data(question_time=time.time())
 
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
@@ -907,6 +909,10 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
     await state.set_state(TaskState.waiting_for_answer)
     await state.update_data(question=question, grade=selected_grade, selected_topic=chosen_topic, last_score=0.0)
 
+    import time
+    await state.update_data(question_time=time.time())
+
+
     await callback.message.edit_text(
         f"💬 Задание для уровня {selected_grade} по теме «{chosen_topic}»:\n\n{question}\n\n"
         "Что хотите сделать?",
@@ -953,6 +959,9 @@ async def cb_next(call: CallbackQuery, state: FSMContext):
 
     # Сбрасываем предыдущий score и сохраняем новый вопрос
     await state.update_data(question=new_q, last_score=0.0)
+    
+    import time
+    await state.update_data(question_time=time.time())
 
     # Меняем текст текущего сообщения на новый вопрос + inline-клавиатуру
     await call.message.edit_text(
