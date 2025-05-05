@@ -34,6 +34,23 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
 
+# ────────────────────────────────────────────────────
+# inline-клавиатуры для навигации
+# После генерации нового вопроса (есть кнопка «Уточнить»)
+NAV_KB_QUESTION = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="➡️ Следующий вопрос",        callback_data="nav_next")],
+    [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
+    [InlineKeyboardButton(text="❓ Уточнить вопрос",           callback_data="clarify_info")],
+    [InlineKeyboardButton(text="🏠 Главное меню",             callback_data="nav_main")]
+])
+
+# После оценки ответа (без кнопки «Уточнить»)
+NAV_KB_AFTER_ANSWER = InlineKeyboardMarkup(inline_keyboard=[
+    [InlineKeyboardButton(text="➡️ Следующий вопрос",        callback_data="nav_next")],
+    [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
+    [InlineKeyboardButton(text="🏠 Главное меню",             callback_data="nav_main")]
+])
+# ────────────────────────────────────────────────────
 # --------------------------
 # Инициализация бота и диспетчера
 # --------------------------
@@ -894,43 +911,48 @@ async def handle_topic_selection(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data=="nav_show")
 async def cb_show(call: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    q, g = data.get("last_question"), data.get("last_grade")
+    q     = data.get("last_question")
+    g     = data.get("last_grade")
     if not q or not g:
-        return await call.answer("Нет активного задания", show_alert=True)
-    correct = await generate_correct_answer(q, g)
-    kb = InlineKeyboardMarkup(inline_keyboard=[
-       [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
-       [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
-    ])
+        return await call.answer("Нет активного вопроса", show_alert=True)
 
-    await call.message.edit_text(f"✅ Эталонный ответ:\n\n{correct}", parse_mode="HTML", reply_markup=kb)
+    # Генерируем эталонный ответ
+    correct = await generate_correct_answer(q, g)
+
+    # Редактируем сообщение, выводим правильный ответ + возможность уточнить снова
+    await call.message.edit_text(
+        f"✅ Эталонный ответ:\n\n{correct}",
+        parse_mode="HTML",
+        reply_markup=NAV_KB_QUESTION
+    )
     await call.answer()
 
 @router.callback_query(F.data=="nav_next")
 async def cb_next(call: CallbackQuery, state: FSMContext):
-    data  = await state.get_data()
-    grade = data.get("grade"); topic=data.get("selected_topic")
-    user  = await get_user_from_db(call.from_user.id)
-    if not grade or not topic or not user:
-        return await call.answer("Нет данных для нового вопроса", show_alert=True)
-    new_q = await generate_question(grade, topic, user["name"])
-    await state.update_data(
-    question=new_q,
-    last_score=0.0,
-    grade=grade,
-    selected_topic=topic
-)
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="✍️ Ответить текстом"), KeyboardButton(text="🎤 Ответить голосом")],
-            [KeyboardButton(text="❓ Уточнить по вопросу")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
-    )
+    # Получаем из state, что было в предыдущем вопросе
+    data = await state.get_data()
+    user = await get_user_from_db(call.from_user.id)
+    if not user:
+        return await call.answer("Пользователь не найден", show_alert=True)
 
-    await call.message.edit_text(f"Новый вопрос:\n\n{new_q}", reply_markup=kb)
+    # В зависимости от режима (общий или академия) генерируем следующий вопрос
+    if data.get("is_academy_task"):
+        main_topic = data.get("selected_academy_topic")
+        subtopic   = data.get("selected_topic")
+        new_q = await generate_academy_question(main_topic, subtopic, user["name"])
+    else:
+        grade = data.get("grade")
+        topic = data.get("selected_topic")
+        new_q = await generate_question(grade, topic, user["name"])
+
+    # Сбрасываем предыдущий score и сохраняем новый вопрос
+    await state.update_data(question=new_q, last_score=0.0)
+
+    # Меняем текст текущего сообщения на новый вопрос + inline-клавиатуру
+    await call.message.edit_text(
+        f"🎯 Новый вопрос:\n\n{new_q}",
+        reply_markup=NAV_KB_QUESTION
+    )
     await call.answer()
 
 @router.callback_query(F.data=="nav_main")
@@ -1038,7 +1060,7 @@ async def process_clarification(message: Message, state: FSMContext):
 async def handle_task_answer(message: Message, state: FSMContext):
     text = message.text.strip()
 
-    # Проверка текущего состояния
+    # Убедимся, что мы в нужном состоянии
     current_state = await state.get_state()
     if current_state != TaskState.waiting_for_answer.state:
         await message.answer(
@@ -1048,36 +1070,26 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
-    # Обработка спец-кнопок
+    # Обработка специальных кнопок (хотя inline-кнопок здесь нет)
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
-        await message.answer(
-            "✏️ Напишите, пожалуйста, свой ответ текстом.",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await message.answer("✏️ Напишите, пожалуйста, свой ответ текстом.", reply_markup=ReplyKeyboardRemove())
         return
 
     if text == "🎤 Ответить голосом":
-        await message.answer(
-            "🎤 Пожалуйста, отправьте голосовое сообщение.",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await message.answer("🎤 Пожалуйста, отправьте голосовое сообщение.", reply_markup=ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_voice)
         return
 
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
         await state.set_state(TaskState.waiting_for_clarification)
-        await message.answer(
-            "✏️ Напишите, что именно хотите уточнить по заданию:",
-            reply_markup=ReplyKeyboardRemove()
-        )
+        await message.answer("✏️ Напишите, что именно хотите уточнить по заданию:", reply_markup=ReplyKeyboardRemove())
         return
 
+    # Если не спец-кнопка — обрабатываем ответ студента
     await process_real_student_answer(message, state)
 
-    logging.info(f"[DEBUG] Received text: {repr(text)}")
     data = await state.get_data()
-
-    grade = data.get("grade")
+    grade    = data.get("grade")
     question = data.get("question")
     last_score = data.get("last_score", 0.0)
 
@@ -1090,18 +1102,16 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await message.answer("⚠️ Пользователь не найден.")
         return
 
+    # Проверка на шаблонные фразы
     if detect_gpt_phrases(text):
         await message.answer(
             "⚠️ Похоже, что ваш ответ содержит шаблонные фразы. "
-            "Постарайтесь переформулировать своими словами, чтобы получить честную оценку."
+            "Постарайтесь переформулировать своими словами для честной оценки."
         )
         return
 
-    student_name = user["name"]
-    logging.info(f"[DEBUG] Оцениваем ответ для вопроса: {repr(question)} пользователя: {student_name}")
-    feedback_raw = await evaluate_answer(question, text, student_name)
-    logging.info(f"[DEBUG] RAW FEEDBACK:\n{feedback_raw}")
-
+    # Оцениваем ответ
+    feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
         await message.answer(
             "❌ Произошла ошибка при оценке ответа. Попробуйте снова или вернитесь в главное меню.",
@@ -1110,9 +1120,10 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.clear()
         return
 
+    # Извлекаем критерии, новый счёт и текст фидбэка
+    import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
-
     if match:
         criteria_block = match.group(1).strip()
         try:
@@ -1125,21 +1136,17 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
+    # Формируем сообщение с результатами
     result_msg = ""
     if criteria_block:
-        result_msg += f"<b>\ud83d\udcca Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>\ud83e\uddee Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
-    result_msg += f"<b>\ud83d\udcac Обратная связь (Feedback):</b>\n{feedback_text}"
+        result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    inline_nav = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➡️ Следующий вопрос", callback_data="nav_next")],
-        [InlineKeyboardButton(text="✅ Показать правильный ответ", callback_data="nav_show")],
-        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="nav_main")]
-    ])
-
+    # Если есть прирост баллов — сохраняем их и апдейтим уровень
     if new_score > last_score:
         if data.get("is_academy_task"):
-            await update_academy_points(message.from_user.id, new_score - last_score)
+            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), new_score - last_score)
         else:
             await update_user_points(message.from_user.id, new_score - last_score)
 
@@ -1155,27 +1162,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    if data.get("is_academy_task"):
-        await message.answer(
-            "✅ Отличная работа над заданием Академии!\n\nВыберите следующую тему или вернитесь в главное меню:",
-            reply_markup=await build_academy_topics_menu()
-        )
-    else:
-        await message.answer(result_msg, parse_mode="HTML", reply_markup=inline_nav)
+    # Отправляем результат вместе с inline-клавиатурой «после ответа»
+    await message.answer(
+        result_msg,
+        parse_mode="HTML",
+        reply_markup=NAV_KB_AFTER_ANSWER
+    )
 
+    # Сохраняем для nav_show и nav_next
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
-    text = message.text.strip() if message.text else ""
-
-    # Проверка на наличие голосового сообщения
+    # Проверяем, что это действительно голосовое сообщение
     if not message.voice:
         await message.answer("⚠️ Пожалуйста, отправьте именно голосовое сообщение.")
         return
 
-    # Обработка файла
+    # Скачиваем голосовой файл
     voice = message.voice
     file = await bot.get_file(voice.file_id)
     file_path = file.file_path
@@ -1188,39 +1193,41 @@ async def process_voice_message(message: Message, state: FSMContext):
             with open(save_path, "wb") as f:
                 f.write(await resp.read())
 
+    # Расшифровка
     text = await transcribe_audio(save_path)
     os.remove(save_path)
     await message.answer(f"📝 Расшифровка: «{text}»\nОцениваю...")
 
-    # Проверка на шаблонные GPT-фразы (после голосовой расшифровки)
+    # Проверка на шаблонные GPT-фразы
     if detect_gpt_phrases(text):
         await message.answer(
-        "⚠️ Похоже, что ваш голосовой ответ содержит шаблонные GPT-фразы. "
-        "Попробуйте переформулировать своими словами, чтобы получить более точную и честную оценку.",
-        reply_markup=get_main_menu()
-    )
+            "⚠️ Похоже, что ваш голосовой ответ содержит шаблонные GPT-фразы. "
+            "Попробуйте переформулировать своими словами, чтобы получить более точную и честную оценку.",
+            reply_markup=get_main_menu()
+        )
         await state.clear()
         return
 
-    # Оценка
+    # Получаем данные из state
     data = await state.get_data()
-    question = data.get("question")
-    grade = data.get("grade")
+    question   = data.get("question")
+    grade      = data.get("grade")
     last_score = data.get("last_score", 0.0)
-    user = await get_user_from_db(message.from_user.id)
+    user       = await get_user_from_db(message.from_user.id)
 
     if not user or not grade or not question:
         await message.answer("⚠️ Не найдены данные для оценки.")
         return
 
+    # Оцениваем ответ
     feedback_raw = await evaluate_answer(question, text, user["name"])
-    logging.info(f"[DEBUG] RAW FEEDBACK (voice):\n{feedback_raw}")
-
     if not feedback_raw or "Ошибка" in feedback_raw:
         await message.answer("❌ Ошибка при оценке ответа. Попробуйте снова.", reply_markup=get_main_menu())
         await state.clear()
         return
 
+    # Парсим критерии и новый счёт
+    import re
     pattern = r"Критерии:\s*(.*?)Итог:\s*([\d.]+)\s*Feedback:\s*(.*)"
     match = re.search(pattern, feedback_raw, re.DOTALL)
     if match:
@@ -1235,9 +1242,10 @@ async def process_voice_message(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
+    # Сохраняем баллы, если есть прирост
     if new_score > last_score:
         if data.get("is_academy_task"):
-            await update_academy_points(message.from_user.id, new_score - last_score)
+            await update_academy_topic_points(message.from_user.id, data.get("selected_topic"), new_score - last_score)
         else:
             await update_user_points(message.from_user.id, new_score - last_score)
 
@@ -1253,26 +1261,23 @@ async def process_voice_message(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
+    # Собираем результат в сообщение
     result_msg = ""
     if criteria_block:
-        result_msg += f"<b>Критерии:</b>\n{criteria_block}\n\n"
-    result_msg += f"<b>Оценка (Score):</b> {new_score}\n\n"
-    result_msg += f"<b>Обратная связь (Feedback):</b>\n{feedback_text}"
+        result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
+    result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score, 2)}</code>\n\n"
+    result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➡️ Следующий вопрос")],
-            [KeyboardButton(text="✅ Показать правильный ответ")],
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
-        resize_keyboard=True,
-        one_time_keyboard=True
+    # Отправляем результат с inline-кнопками «после ответа»
+    await message.answer(
+        result_msg,
+        parse_mode="HTML",
+        reply_markup=NAV_KB_AFTER_ANSWER
     )
 
-    await message.answer(result_msg, parse_mode="HTML", reply_markup=ReplyKeyboardRemove())
-    await message.answer("👇 Что делаем дальше?", reply_markup=kb)
+    # Сохраняем для навигации
     await state.update_data(last_question=question, last_grade=grade)
-    await state.set_state(TaskState.waiting_for_answer) 
+    await state.set_state(TaskState.waiting_for_answer)
 
 async def process_real_student_answer(message: Message, state: FSMContext):
     text = message.text.strip()
