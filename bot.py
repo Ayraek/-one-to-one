@@ -25,7 +25,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
 from aiogram.filters import StateFilter
-from aiogram.types import ChatActions
+from aiogram.enums import ChatActions
 print("=== Все импорты прошли успешно ===")
 
 # --------------------------
