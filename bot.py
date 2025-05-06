@@ -25,6 +25,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
 from aiogram.filters import StateFilter
+from aiogram.types import ChatActions
 print("=== Все импорты прошли успешно ===")
 
 # --------------------------
@@ -1083,21 +1084,29 @@ async def process_clarification(message: Message, state: FSMContext):
 # Общий обработчик для TaskState.waiting_for_answer
 # --------------------------
 
-@router.message(TaskState.waiting_for_answer, F.text)
+@router.message(StateFilter(TaskState.waiting_for_answer), F.text)
 async def handle_task_answer(message: Message, state: FSMContext):
+    # 👉 ваш код логирования
     print(f"✅ Состояние {await state.get_state()}: получил ответ «{message.text}»")
     logging.debug(f"Ответ в waiting_for_answer: {message.text}")
     text = message.text.strip()
 
-    # 2) Специальные кнопки: текст/голос/уточнение
+    # 0) Показываем пользователю, что мы начинаем оценивать
+    status = await message.answer("⏳ Оцениваю ваш ответ…")
+    await bot.send_chat_action(message.chat.id, ChatActions.TYPING)
+
+    # 1) Специальные кнопки: текст/голос/уточнение
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
+        await status.delete()
         await message.answer("✏️ Напишите ответ текстом.", reply_markup=ReplyKeyboardRemove())
         return
     if text == "🎤 Ответить голосом":
+        await status.delete()
         await message.answer("🎤 Отправьте голосовое сообщение.", reply_markup=ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_voice)
         return
     if text in ["❓ Уточнить", "❓ Уточнить по вопросу"]:
+        await status.delete()
         await message.answer("✏️ Что хотите уточнить?", reply_markup=ReplyKeyboardRemove())
         await state.set_state(TaskState.waiting_for_clarification)
         return
@@ -1109,6 +1118,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
             query=text
         )
         if cls.label == "AI" and cls.confidence >= AI_CLASSIFIER_CONFIDENCE:
+            await status.delete()
             result_msg = (
                 "<b>📊 Критерии:</b>\n"
                 "• Соответствие вопросу: 0.00\n\n"
@@ -1134,6 +1144,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
         if token_logprobs:
             avg_lp = sum(abs(lp) for lp in token_logprobs) / len(token_logprobs)
             if avg_lp < PERPLEXITY_THRESHOLD:
+                await status.delete()
                 result_msg = (
                     "<b>📊 Критерии:</b>\n"
                     "• Соответствие вопросу: 0.00\n\n"
@@ -1147,27 +1158,31 @@ async def handle_task_answer(message: Message, state: FSMContext):
         logging.warning(f"[AntiCheat] Perplexity error: {e}")
     # ────────────────────────────────────────────────────────────────────
 
-    # 3) Основная логика оценки
+    # 2) Основная логика оценки
     data       = await state.get_data()
     grade      = data.get("grade")
     question   = data.get("question")
     last_score = data.get("last_score", 0.0)
 
     if not grade or not question:
+        await status.delete()
         await message.answer("⚠️ Нет данных задания.", reply_markup=get_main_menu())
         return
 
     user = await get_user_from_db(message.from_user.id)
     if not user:
+        await status.delete()
         await message.answer("⚠️ Пользователь не найден.", reply_markup=get_main_menu())
         return
 
     if detect_gpt_phrases(text):
+        await status.delete()
         await message.answer("⚠️ Переформулируйте ответ своими словами.", reply_markup=NAV_KB_AFTER_ANSWER)
         return
 
     feedback_raw = await evaluate_answer(question, text, user["name"])
     if not feedback_raw or "Ошибка" in feedback_raw:
+        await status.delete()
         await message.answer("❌ Ошибка оценки. Попробуйте позже.", reply_markup=get_main_menu())
         await state.clear()
         return
@@ -1188,24 +1203,21 @@ async def handle_task_answer(message: Message, state: FSMContext):
         new_score = 0.0
         feedback_text = feedback_raw.strip()
 
-    # ─── ANTI-CHEAT STEP 3: EMBEDDING-SIMILARITY С ЭТАЛОННЫМ ─────────────
-    # 1) Генерируем эталонный ответ
+    # ─── ANTI-CHEAT STEP 3: EMBEDDING-SIMILARITY ────────────────────────
     correct = await generate_correct_answer(question, grade)
-    # 2) Берём эмбеддинги студента и эталона
-    stud_emb = await asyncio.to_thread(client.embeddings.create, 
+    stud_emb = await asyncio.to_thread(client.embeddings.create,
         model="text-embedding-ada-002", input=text)
-    corr_emb = await asyncio.to_thread(client.embeddings.create, 
+    corr_emb = await asyncio.to_thread(client.embeddings.create,
         model="text-embedding-ada-002", input=correct)
-    
+
     v1 = stud_emb.data[0].embedding
     v2 = corr_emb.data[0].embedding
-    # 3) Косинусная схожесть
     dot = sum(a*b for a, b in zip(v1, v2))
     norm1 = math.sqrt(sum(a*a for a in v1))
     norm2 = math.sqrt(sum(b*b for b in v2))
     cos_sim = dot / (norm1 * norm2) if norm1 and norm2 else 0.0
     if cos_sim >= SIMILARITY_THRESHOLD:
-        # Помечаем копипаст
+        await status.delete()
         result_msg = (
             "<b>📊 Критерии:</b>\n"
             "• Соответствие вопросу: 0.00\n\n"
@@ -1216,9 +1228,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
         return
-    # ───────────────────────────────────────────────────────────────────
 
-    # Сохранение очков
+    # Сохранение и финальный вывод
     increment = new_score - last_score
     if increment > 0:
         if data.get("is_academy_task"):
@@ -1237,17 +1248,16 @@ async def handle_task_answer(message: Message, state: FSMContext):
         )
         await state.update_data(last_score=new_score)
 
-    # Финальный вывод
     result_msg = ""
     if criteria_block:
         result_msg += f"<b>📊 Критерии:</b>\n{criteria_block}\n\n"
     result_msg += f"<b>🧮 Оценка (Score):</b> <code>{round(new_score,2)}</code>\n\n"
     result_msg += f"<b>💬 Обратная связь (Feedback):</b>\n{feedback_text}"
 
+    await status.delete()
     await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
-
 
 @router.message(TaskState.waiting_for_voice)
 async def process_voice_message(message: Message, state: FSMContext):
