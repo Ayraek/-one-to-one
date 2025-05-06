@@ -1,2 +1,14 @@
 token.env.py
 .env
+# VS Code config
+.vscode/
+
+# Log files
+*.log
+
+# MacOS/Thumbnails
+Thumbs.db
+ehthumbs.db
+echo "token.env.py" >> .gitignore
+echo "test_openai.py" >> .gitignore
+git add .gitignore
