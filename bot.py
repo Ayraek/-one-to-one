@@ -37,8 +37,20 @@ API_TOKEN = os.getenv("API_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ADMIN_IDS = os.getenv("ADMIN_IDS", "")
 admin_ids = [int(x.strip()) for x in ADMIN_IDS.split(",")] if ADMIN_IDS else []
-
 # ────────────────────────────────────────────────────
+# Защищённая инициализация OpenAI клиента
+if OPENAI_API_KEY:
+    client = OpenAI(api_key=OPENAI_API_KEY)
+else:
+    client = None
+    logging.warning("❌ OPENAI_API_KEY is not set. Some features may not work.")
+
+# Защищённая инициализация бота
+if API_TOKEN:
+    bot = Bot(token=API_TOKEN)
+else:
+    bot = None
+    logging.warning("❌ API_TOKEN is not set. Bot will not start properly.")
 # inline-клавиатуры для навигации
 
 # После генерации нового вопроса — только ответ текстом, ответ голосом, уточнение и «Назад»
@@ -1112,13 +1124,28 @@ async def handle_task_answer(message: Message, state: FSMContext):
         await state.set_state(TaskState.waiting_for_clarification)
         return
 
-    # ─── ANTI-CHEAT STEP 1: AI-КЛАССИФИКАТОР ───────────────────────────
+# ─── ANTI-CHEAT STEP 1: GPT-Классификатор ───────────────────────────
     try:
-        cls = await client.classifications.create(
-            model="text-classification-001",
-            query=text
+        prompt = (
+            f"Вот ответ студента:\n\n{text}\n\n"
+            "Ответь только одним словом: Да или Нет — выглядит ли он как сгенерированный ИИ (ChatGPT, Bard и т.д.)?\n"
+            "Никаких объяснений, только одно слово: Да или Нет."
         )
-        if cls.label == "AI" and cls.confidence >= AI_CLASSIFIER_CONFIDENCE:
+
+        response = await asyncio.to_thread(
+            client.chat.completions.create,
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "Ты определяешь, написан ли текст ИИ или человеком."},
+                {"role": "user", "content": prompt}
+            ],
+            max_tokens=1,
+            temperature=0
+        )
+
+        result = response.choices[0].message.content.strip().lower()
+
+        if result == "да":
             await status.delete()
             result_msg = (
                 "<b>📊 Критерии:</b>\n"
@@ -1130,7 +1157,8 @@ async def handle_task_answer(message: Message, state: FSMContext):
             await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
             return
     except Exception as e:
-        logging.warning(f"[AntiCheat] Classifier error: {e}")
+        logging.warning(f"[AntiCheat] GPT classifier error: {e}")
+
     # ────────────────────────────────────────────────────────────────────
 
     # ─── ANTI-CHEAT STEP 2: PERPLEXITY ЧЕРЕЗ DAVINCI ────────────────────
