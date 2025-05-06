@@ -1224,7 +1224,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
             "<b>🧮 Оценка (Score):</b> <code>0.00</code>\n\n"
             "<b>💬 Обратная связь (Feedback):</b>\n"
             "Ваш ответ слишком близок к эталонному — вероятно, скопирован из ИИ. "
-            "Пожалуйста, переформулируйте своими словами."
+            "Пожалуйста, пишите ответ своими словами. За обман предусмотрена блокировка."
         )
         await message.answer(result_msg, parse_mode="HTML", reply_markup=NAV_KB_AFTER_ANSWER)
         return
@@ -1259,19 +1259,25 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
-@router.message(TaskState.waiting_for_voice)
+@router.message(StateFilter(TaskState.waiting_for_voice), F.voice)
 async def process_voice_message(message: Message, state: FSMContext):
-    if not message.voice:
-        await message.answer("⚠️ Отправьте голосовое сообщение.")
-        return
-
-    # ... (скачивание и транскрипция как было) ...
+    # 1) сразу предупредить, что начали обрабатывать
+    status = await message.answer("⏳ Обрабатываю голосовое…")
+    # 2) скачать файл
+    file = await bot.get_file(message.voice.file_id)
+    save_path = f"/tmp/{message.voice.file_id}.ogg"
+    await file.download(save_path)
+    # 3) расшифровать
     text = await transcribe_audio(save_path)
     os.remove(save_path)
+    # 4) удалить статус
+    await status.delete()
+
     await message.answer(f"📝 Расшифровка: «{text}»")
 
+    # проверка на «слишком ИИ»
     if detect_gpt_phrases(text):
-        await message.answer("⚠️ Переформулируйте ответ своими словами.", reply_markup=get_main_menu())
+        await message.answer("⚠️ Пожалуйста, пишите ответ своими словами. За обман предусмотрена блокировка", reply_markup=get_main_menu())
         await state.clear()
         return
 
