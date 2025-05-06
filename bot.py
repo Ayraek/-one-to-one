@@ -1261,15 +1261,21 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
 @router.message(StateFilter(TaskState.waiting_for_voice), F.content_type == types.ContentType.VOICE)
 async def process_voice_message(message: Message, state: FSMContext):
+    # 👉 лог для отладки
+    logging.debug("🚀 process_voice_message triggered")
+
     # 1) предупредить пользователя
     status = await message.answer("⏳ Обрабатываю голосовое…")
+
     # 2) скачать файл
     file = await bot.get_file(message.voice.file_id)
     save_path = f"/tmp/{message.voice.file_id}.ogg"
     await file.download(save_path)
+
     # 3) транскрибировать
     text = await transcribe_audio(save_path)
     os.remove(save_path)
+
     # 4) удалить статус
     await status.delete()
 
