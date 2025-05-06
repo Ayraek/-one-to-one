@@ -25,7 +25,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.fsm.state import StatesGroup, State
 from inactivity_middleware import InactivityMiddleware
 from aiogram.filters import StateFilter
-from aiogram.enums import ChatActions
+from aiogram.enums import ChatAction
 print("=== Все импорты прошли успешно ===")
 
 # --------------------------
@@ -1093,7 +1093,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
     # 0) Показываем пользователю, что мы начинаем оценивать
     status = await message.answer("⏳ Оцениваю ваш ответ…")
-    await bot.send_chat_action(message.chat.id, ChatActions.TYPING)
+    await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
     # 1) Специальные кнопки: текст/голос/уточнение
     if text in ["✍️ Ответить", "✍️ Ответить текстом"]:
