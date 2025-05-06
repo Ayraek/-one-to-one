@@ -995,11 +995,11 @@ async def cb_start_answer(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "start_voice")
 async def cb_start_voice(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
+    # переводим FSM в режим ожидания голоса
     await state.set_state(TaskState.waiting_for_voice)
-    await callback.message.answer(
-        "🎤 Отправьте голосовое сообщение.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    # просим пользователя прислать голос
+    await callback.message.answer("🎤 Отправьте, пожалуйста, голосовое сообщение.", reply_markup=ReplyKeyboardRemove())
+
 
 @router.callback_query(F.data == "back_to_topics")
 async def back_to_topics(callback: CallbackQuery, state: FSMContext):
@@ -1086,12 +1086,12 @@ async def process_clarification(message: Message, state: FSMContext):
 
 @router.message(StateFilter(TaskState.waiting_for_answer), F.text)
 async def handle_task_answer(message: Message, state: FSMContext):
-    # 👉 ваш код логирования
+    # 👉 логируем для отладки
     print(f"✅ Состояние {await state.get_state()}: получил ответ «{message.text}»")
     logging.debug(f"Ответ в waiting_for_answer: {message.text}")
     text = message.text.strip()
 
-    # 0) Показываем пользователю, что мы начинаем оценивать
+    # 0) Отправляем промп сообщение и ставим «печатает»
     status = await message.answer("⏳ Оцениваю ваш ответ…")
     await bot.send_chat_action(message.chat.id, ChatAction.TYPING)
 
