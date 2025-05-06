@@ -1083,10 +1083,10 @@ async def process_clarification(message: Message, state: FSMContext):
 # Общий обработчик для TaskState.waiting_for_answer
 # --------------------------
 
-@router.message(StateFilter(TaskState.waiting_for_answer), F.text)
+@router.message(TaskState.waiting_for_answer, F.text)
 async def handle_task_answer(message: Message, state: FSMContext):
-    print("✅ Пользователь написал ответ")
-    logging.debug("Got user answer in waiting_for_answer")  # временный лог для отладки
+    print(f"✅ Состояние {await state.get_state()}: получил ответ «{message.text}»")
+    logging.debug(f"Ответ в waiting_for_answer: {message.text}")
     text = message.text.strip()
 
     # 2) Специальные кнопки: текст/голос/уточнение
@@ -1528,7 +1528,7 @@ async def transcribe_audio(file_path: str) -> str:
 # Автостарт при любой активности вне FSM
 # --------------------------
 
-@router.message(StateFilter(None), F.text)
+@router.message(None, F.text)
 async def catch_all(message: Message, state: FSMContext):
     current_state = await state.get_state()
     # теперь этот хендлер никогда не будет ловить messages, когда state != None
