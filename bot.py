@@ -1192,14 +1192,11 @@ async def handle_task_answer(message: Message, state: FSMContext):
     # 1) Генерируем эталонный ответ
     correct = await generate_correct_answer(question, grade)
     # 2) Берём эмбеддинги студента и эталона
-    stud_emb = await client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=text
-    )
-    corr_emb = await client.embeddings.create(
-        model="text-embedding-ada-002",
-        input=correct
-    )
+    stud_emb = await asyncio.to_thread(client.embeddings.create, 
+        model="text-embedding-ada-002", input=text)
+    corr_emb = await asyncio.to_thread(client.embeddings.create, 
+        model="text-embedding-ada-002", input=correct)
+    
     v1 = stud_emb.data[0].embedding
     v2 = corr_emb.data[0].embedding
     # 3) Косинусная схожесть
