@@ -1259,7 +1259,7 @@ async def handle_task_answer(message: Message, state: FSMContext):
     await state.update_data(last_question=question, last_grade=grade)
     await state.set_state(TaskState.waiting_for_answer)
 
-@router.message(StateFilter(TaskState.waiting_for_voice), F.voice)
+@router.message(StateFilter(TaskState.waiting_for_voice), F.content_type == types.ContentType.VOICE)
 async def process_voice_message(message: Message, state: FSMContext):
     # 1) предупредить пользователя
     status = await message.answer("⏳ Обрабатываю голосовое…")
