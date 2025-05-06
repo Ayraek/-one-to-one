@@ -7,6 +7,7 @@ import asyncpg
 import asyncio
 from urllib.parse import urlparse
 import math
+import tempfile
 from aiogram.filters import StateFilter
 from aiogram import F
 from dotenv import load_dotenv
@@ -1261,25 +1262,39 @@ async def handle_task_answer(message: Message, state: FSMContext):
 
 @router.message(StateFilter(TaskState.waiting_for_voice), F.content_type == types.ContentType.VOICE)
 async def process_voice_message(message: Message, state: FSMContext):
-    # 👉 лог для отладки
-    logging.debug("🚀 process_voice_message triggered")
+    logging.debug("🚀 Началась обработка голосового сообщения")
 
-    # 1) предупредить пользователя
-    status = await message.answer("⏳ Обрабатываю голосовое…")
+    # 1. Уведомляем пользователя
+    status = await message.answer("⏳ Обрабатываю голосовое сообщение...")
 
-    # 2) скачать файл
-    file = await bot.get_file(message.voice.file_id)
-    save_path = f"/tmp/{message.voice.file_id}.ogg"
-    await file.download(save_path)
+    try:
+        # 2. Получаем файл с сервера Telegram
+        file = await bot.get_file(message.voice.file_id)
 
-    # 3) транскрибировать
-    text = await transcribe_audio(save_path)
-    os.remove(save_path)
+        # 3. Сохраняем во временный файл
+        import tempfile
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".ogg") as tmp:
+            temp_path = tmp.name
+        await bot.download_file(file.file_path, destination=temp_path)
+        logging.debug(f"📁 Файл сохранён: {temp_path}")
 
-    # 4) удалить статус
-    await status.delete()
+        # 4. Транскрибируем с помощью Whisper
+        logging.debug("🎙 Отправка в transcribe_audio...")
+        text = await transcribe_audio(temp_path)
 
-    await message.answer(f"📝 Расшифровка: «{text}»")
+        # 5. Удаляем временный файл
+        os.remove(temp_path)
+        logging.debug("🧹 Временный файл удалён")
+
+        # 6. Показываем результат пользователю
+        await status.delete()
+        await message.answer(f"📝 Расшифровка: «{text}»")
+
+    except Exception as e:
+        logging.exception(f"❌ Ошибка при обработке голосового: {e}")
+        await status.delete()
+        await message.answer("❌ Не удалось обработать голосовое сообщение. Попробуйте ещё раз.")
+        return
 
     # проверка на «слишком ИИ»
     if detect_gpt_phrases(text):
