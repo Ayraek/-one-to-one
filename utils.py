@@ -1,9 +1,9 @@
 import re
 import logging
 import asyncio
-from openai import OpenAI
+import openai  # просто импортируем библиотеку, без OpenAI
 
-client = OpenAI(api_key="FAKE-KEY")  # заменим позже на реальный ключ
+openai.api_key = "FAKE-KEY"  # заменим позже на реальный ключ
 
 def detect_gpt_phrases(text: str) -> bool:
     suspicious_phrases = re.compile(
@@ -15,7 +15,6 @@ def detect_gpt_phrases(text: str) -> bool:
         re.IGNORECASE
     )
     return bool(suspicious_phrases.search(text))
-
 
 async def evaluate_answer(question: str, student_answer: str, student_name: str) -> str:
     prompt = (
@@ -45,7 +44,7 @@ async def evaluate_answer(question: str, student_answer: str, student_name: str)
 
     try:
         response = await asyncio.to_thread(
-            client.chat.completions.create,
+            openai.ChatCompletion.create,
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "Ты строгий преподаватель."},
